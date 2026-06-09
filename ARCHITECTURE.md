@@ -657,6 +657,18 @@ Todo:
 - Clear colour coding for Export Session
 - Clearer button for Import Session
 
+### Phase L: Usability
+
+Status: In progress.
+
+Implementation improvements:
+
+- Load examples (make this have a prompt, as it removed all existing configs, and can only be got back if 'Export Session JSON' was done prior)
+- Button to expand Graph Visualiser 
+    - Move 'Export Graph PNG' to graph visualiser
+    - 
+- Dropdown button for Device Relationship Map "see more" when items exceed 15 items
+- 
 
 ## Development Notes
 

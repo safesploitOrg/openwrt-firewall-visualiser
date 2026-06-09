@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<title>OpenWRT Firewall Relationship Visualiser</title>
+	<title>OpenWrt Firewall Relationship Visualiser</title>
 
 	<script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 
@@ -344,6 +344,27 @@
 			display: inline-block;
 		}
 
+		.site-footer {
+			background: var(--bg-dark);
+			border-top: 1px solid var(--border);
+			color: var(--muted);
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0.5rem;
+			justify-content: center;
+			padding: 1rem 1.5rem;
+			font-size: 0.9rem;
+		}
+
+		.site-footer a {
+			color: var(--info);
+			text-decoration: none;
+		}
+
+		.site-footer a:hover {
+			text-decoration: underline;
+		}
+
 		@media (max-width: 1150px) {
 			main {
 				grid-template-columns: 1fr;
@@ -364,7 +385,7 @@
 
 <body>
 	<header>
-		<h1>🔥 OpenWRT Firewall Relationship Visualiser</h1>
+		<h1>🔥 OpenWrt Firewall Relationship Visualiser</h1>
 		<p>Paste `/etc/config/firewall`, map devices to zones, then visualise subnet and device relationships.</p>
 	</header>
 
@@ -379,7 +400,7 @@
 				<strong>Recommended source file:</strong>
 				<code>/etc/config/firewall</code>
 
-				<p>On OpenWRT, run:</p>
+				<p>On OpenWrt, run:</p>
 				<pre>cat /etc/config/firewall</pre>
 
 				<p>Then paste the output below.</p>
@@ -450,7 +471,7 @@
 					<button onclick="renderGraph('circle')">Circle Layout</button>
 					<button onclick="renderGraph('breadthfirst')">Layered Layout</button>
 					<button onclick="fitGraph()">Fit Graph</button>
-					<select id="graphFilter" onchange="renderGraph()">
+					<select id="graphFilter" onchange="handleGraphFilterChange()">
 						<option value="all">Show all relationships</option>
 						<option value="allowed">Allowed only</option>
 						<option value="blocked">Blocked only</option>
@@ -481,6 +502,12 @@
 			<div id="relationshipView" class="relationships"></div>
 		</section>
 	</main>
+
+	<footer class="site-footer">
+		<a href="https://github.com/safesploitOrg/openwrt-firewall-visualiser" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+		<span>|</span>
+		<span>© <span id="currentYear"></span></span>
+	</footer>
 
 	<script>
 		const EXAMPLE_FIREWALL = `config zone
@@ -546,6 +573,15 @@ config rule
 			{ name: "Guest Phone", ip: "172.16.30.25", zone: "guest" }
 		];
 
+		const STORAGE_KEY = "openwrt-firewall-visualiser-state";
+		const CURRENT_YEAR_ID = "currentYear";
+		const DEFAULT_TEST_PATH = {
+			srcIndex: "0",
+			dstIndex: "1"
+		};
+		const VALID_GRAPH_LAYOUTS = ["cose", "circle", "breadthfirst"];
+		const VALID_GRAPH_FILTERS = ["all", "allowed", "blocked", "zones", "devices"];
+
 		let devices = structuredClone(DEFAULT_DEVICES);
 
 		let firewallModel = {
@@ -556,11 +592,19 @@ config rule
 
 		let cy = null;
 		let currentLayout = "cose";
+		let selectedTestPath = structuredClone(DEFAULT_TEST_PATH);
+		let storageAvailable = true;
+
+		const autoParse = debounce(() => {
+			parseAndRender();
+		}, 500);
 
 		function main() {
-			document.getElementById("firewallInput").value = EXAMPLE_FIREWALL;
+			setCurrentYear();
+			loadFromLocalStorage();
+			bindReactiveControls();
 			renderDeviceInputs();
-			parseAndRender();
+			parseAndRender({ persist: false });
 		}
 
 		function toggleHelp() {
@@ -570,6 +614,7 @@ config rule
 		function loadExample() {
 			document.getElementById("firewallInput").value = EXAMPLE_FIREWALL;
 			devices = structuredClone(DEFAULT_DEVICES);
+			selectedTestPath = structuredClone(DEFAULT_TEST_PATH);
 			renderDeviceInputs();
 			parseAndRender();
 		}
@@ -604,6 +649,7 @@ config rule
 
 		function resetDevices() {
 			devices = structuredClone(DEFAULT_DEVICES);
+			selectedTestPath = structuredClone(DEFAULT_TEST_PATH);
 			renderDeviceInputs();
 			parseAndRender();
 		}
@@ -630,6 +676,10 @@ config rule
 		}
 
 		function updateDevice(index, key, value) {
+			if (!devices[index]) {
+				return;
+			}
+
 			devices[index][key] = value.trim();
 			parseAndRender();
 		}
@@ -640,7 +690,8 @@ config rule
 			parseAndRender();
 		}
 
-		function parseAndRender() {
+		function parseAndRender(options = {}) {
+			const shouldPersist = options.persist !== false;
 			const configText = document.getElementById("firewallInput").value;
 			firewallModel = parseOpenWrtFirewall(configText);
 
@@ -650,6 +701,198 @@ config rule
 			renderMatrix();
 			renderDeviceSelectors();
 			renderRelationshipMap();
+			renderCurrentTestResult(false);
+
+			if (shouldPersist) {
+				saveToLocalStorage();
+			}
+		}
+
+		function bindReactiveControls() {
+			const firewallInput = document.getElementById("firewallInput");
+			const srcSelect = document.getElementById("srcDevice");
+			const dstSelect = document.getElementById("dstDevice");
+
+			if (firewallInput) {
+				firewallInput.addEventListener("input", autoParse);
+				firewallInput.addEventListener("change", () => parseAndRender());
+			}
+
+			if (srcSelect) {
+				srcSelect.addEventListener("change", handleTestSelectorChange);
+			}
+
+			if (dstSelect) {
+				dstSelect.addEventListener("change", handleTestSelectorChange);
+			}
+
+			window.addEventListener("beforeunload", saveToLocalStorage);
+		}
+
+		function handleTestSelectorChange() {
+			updateSelectedTestPathFromSelectors();
+			renderCurrentTestResult();
+		}
+
+		function loadFromLocalStorage() {
+			const savedState = readStoredState();
+			const firewallInput = document.getElementById("firewallInput");
+			const graphFilter = document.getElementById("graphFilter");
+
+			firewallInput.value = typeof savedState.configText === "string"
+				? savedState.configText
+				: EXAMPLE_FIREWALL;
+			devices = normaliseSavedDevices(savedState.devices);
+			currentLayout = normaliseGraphLayout(savedState.graphLayout);
+			selectedTestPath = normaliseSavedTestPath(savedState.testPath);
+
+			if (graphFilter) {
+				graphFilter.value = normaliseGraphFilter(savedState.graphFilter);
+			}
+		}
+
+		function saveToLocalStorage() {
+			if (!storageAvailable) {
+				return;
+			}
+
+			try {
+				const payload = {
+					version: 1,
+					configText: document.getElementById("firewallInput")?.value || "",
+					devices,
+					graphLayout: currentLayout,
+					graphFilter: getGraphFilterValue(),
+					testPath: selectedTestPath
+				};
+
+				window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+			} catch (error) {
+				storageAvailable = false;
+				console.warn("Local storage is unavailable. Session state will not persist.", error);
+			}
+		}
+
+		function readStoredState() {
+			if (!storageAvailable) {
+				return {};
+			}
+
+			let rawState = null;
+
+			try {
+				rawState = window.localStorage.getItem(STORAGE_KEY);
+			} catch (error) {
+				storageAvailable = false;
+				console.warn("Local storage is unavailable. Starting with defaults.", error);
+				return {};
+			}
+
+			if (!rawState) {
+				return {};
+			}
+
+			try {
+				const parsedState = JSON.parse(rawState);
+
+				if (!parsedState || typeof parsedState !== "object") {
+					return {};
+				}
+
+				return parsedState;
+			} catch (error) {
+				console.warn("Saved state could not be parsed. Starting with defaults.", error);
+				return {};
+			}
+		}
+
+		function normaliseSavedDevices(value) {
+			if (!Array.isArray(value)) {
+				return structuredClone(DEFAULT_DEVICES);
+			}
+
+			return value
+				.filter((device) => device && typeof device === "object")
+				.map((device) => {
+					return {
+						name: String(device.name || "").trim(),
+						ip: String(device.ip || "").trim(),
+						zone: String(device.zone || "").trim()
+					};
+				});
+		}
+
+		function normaliseSavedTestPath(value) {
+			if (!value || typeof value !== "object") {
+				return structuredClone(DEFAULT_TEST_PATH);
+			}
+
+			return {
+				srcIndex: String(value.srcIndex ?? DEFAULT_TEST_PATH.srcIndex),
+				dstIndex: String(value.dstIndex ?? DEFAULT_TEST_PATH.dstIndex)
+			};
+		}
+
+		function updateSelectedTestPathFromSelectors() {
+			const srcSelect = document.getElementById("srcDevice");
+			const dstSelect = document.getElementById("dstDevice");
+
+			selectedTestPath = {
+				srcIndex: srcSelect?.value || selectedTestPath.srcIndex,
+				dstIndex: dstSelect?.value || selectedTestPath.dstIndex
+			};
+
+			normaliseSelectedTestPath();
+		}
+
+		function normaliseSelectedTestPath() {
+			const fallbackSrcIndex = devices.length > 0 ? "0" : "";
+			const fallbackDstIndex = devices.length > 1 ? "1" : fallbackSrcIndex;
+
+			selectedTestPath = {
+				srcIndex: isValidDeviceIndex(selectedTestPath.srcIndex) ? String(Number(selectedTestPath.srcIndex)) : fallbackSrcIndex,
+				dstIndex: isValidDeviceIndex(selectedTestPath.dstIndex) ? String(Number(selectedTestPath.dstIndex)) : fallbackDstIndex
+			};
+		}
+
+		function isValidDeviceIndex(value) {
+			if (value === "" || value === null || value === undefined) {
+				return false;
+			}
+
+			const index = Number(value);
+			return Number.isInteger(index) && index >= 0 && index < devices.length;
+		}
+
+		function getGraphFilterValue() {
+			return normaliseGraphFilter(document.getElementById("graphFilter")?.value);
+		}
+
+		function normaliseGraphFilter(value) {
+			return VALID_GRAPH_FILTERS.includes(value) ? value : "all";
+		}
+
+		function normaliseGraphLayout(value) {
+			return VALID_GRAPH_LAYOUTS.includes(value) ? value : "cose";
+		}
+
+		function setCurrentYear() {
+			const yearElement = document.getElementById(CURRENT_YEAR_ID);
+
+			if (!yearElement) {
+				return;
+			}
+
+			yearElement.textContent = String(new Date().getFullYear());
+		}
+
+		function debounce(fn, delay) {
+			let timeoutId = null;
+
+			return function debounced(...args) {
+				window.clearTimeout(timeoutId);
+				timeoutId = window.setTimeout(() => fn.apply(this, args), delay);
+			};
 		}
 
 		function parseOpenWrtFirewall(text) {
@@ -775,7 +1018,7 @@ config rule
 			const zones = Object.values(firewallModel.zones);
 
 			if (zones.length === 0) {
-				container.innerHTML = `<p class="small">No zones detected. Paste an OpenWRT firewall config and click Parse.</p>`;
+				container.innerHTML = `<p class="small">No zones detected. Paste an OpenWrt firewall config and click Parse.</p>`;
 				return;
 			}
 
@@ -853,6 +1096,8 @@ config rule
 				return;
 			}
 
+			normaliseSelectedTestPath();
+
 			const options = devices.map((device, index) => {
 				return `<option value="${index}">${escapeHtml(device.name)} (${escapeHtml(device.zone)})</option>`;
 			}).join("");
@@ -860,9 +1105,8 @@ config rule
 			srcSelect.innerHTML = options;
 			dstSelect.innerHTML = options;
 
-			if (devices.length > 1) {
-				dstSelect.selectedIndex = 1;
-			}
+			srcSelect.value = selectedTestPath.srcIndex;
+			dstSelect.value = selectedTestPath.dstIndex;
 		}
 
 		function renderRelationshipMap() {
@@ -898,7 +1142,8 @@ config rule
 
 		function renderGraph(layoutName = null) {
 			if (layoutName) {
-				currentLayout = layoutName;
+				currentLayout = normaliseGraphLayout(layoutName);
+				saveToLocalStorage();
 			}
 
 			const elements = buildGraphElements();
@@ -1023,6 +1268,12 @@ config rule
 					cy.elements().removeClass("highlighted faded");
 				}
 			});
+		}
+
+		function handleGraphFilterChange() {
+			renderGraph();
+			renderCurrentTestResult(false);
+			saveToLocalStorage();
 		}
 
 		function buildGraphElements() {
@@ -1239,14 +1490,45 @@ config rule
 			connectedNodes.removeClass("faded").addClass("highlighted");
 		}
 
-		function testDevicePath() {
+		function renderCurrentTestResult(persist = true) {
+			const result = document.getElementById("testResult");
+
+			if (!result) {
+				return;
+			}
+
+			if (devices.length === 0) {
+				result.innerHTML = "Add a device to test traffic between devices.";
+
+				if (persist) {
+					saveToLocalStorage();
+				}
+
+				return;
+			}
+
+			testDevicePath(persist);
+		}
+
+		function testDevicePath(persist = true) {
 			const srcIndex = document.getElementById("srcDevice").value;
 			const dstIndex = document.getElementById("dstDevice").value;
+
+			selectedTestPath = {
+				srcIndex,
+				dstIndex
+			};
 
 			const src = devices[srcIndex];
 			const dst = devices[dstIndex];
 
 			if (!src || !dst) {
+				document.getElementById("testResult").innerHTML = "Select two devices and test whether traffic is allowed.";
+
+				if (persist) {
+					saveToLocalStorage();
+				}
+
 				return;
 			}
 
@@ -1265,6 +1547,10 @@ config rule
 			`;
 
 			highlightTestedPath(Number(srcIndex), Number(dstIndex));
+
+			if (persist) {
+				saveToLocalStorage();
+			}
 		}
 
 		function highlightTestedPath(srcIndex, dstIndex) {

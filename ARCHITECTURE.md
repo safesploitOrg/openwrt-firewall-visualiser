@@ -7,7 +7,7 @@ The OpenWrt Firewall Relationship Visualiser is a single-page browser applicatio
 The application is intentionally local-first:
 
 - Firewall text is parsed in the browser.
-- Device mappings are held in browser memory for the current session.
+- Firewall text, device mappings, graph preferences, and the selected test path are saved in `localStorage` when available.
 - No backend, database, build step, or package manager is required.
 - The only runtime dependency is Cytoscape.js, loaded from a CDN for graph rendering.
 
@@ -43,6 +43,8 @@ The app keeps a small amount of global state inside `public/index.html`:
 | `firewallModel` | Parsed zones, forwardings, and traffic rules |
 | `cy` | Current Cytoscape graph instance |
 | `currentLayout` | Selected graph layout name |
+| `selectedTestPath` | Source and destination device indexes used by the path tester |
+| `storageAvailable` | Guard for browsers where `localStorage` is blocked or unavailable |
 
 ## Data Model
 
@@ -334,6 +336,7 @@ The example is useful for demonstrating the relationship views, but it should no
 ## Security Considerations
 
 - Firewall text and device mappings stay in the browser.
+- Saved sessions use browser `localStorage`; they are not sent to a server.
 - Local file loading uses the browser `FileReader` API.
 - User-controlled strings are escaped before being inserted into rendered HTML.
 - The app is static and can be hosted on any static web server.
@@ -348,7 +351,7 @@ The example is useful for demonstrating the relationship views, but it should no
 | Simplified parser | Good for common UCI files, not a complete UCI interpreter |
 | Simplified decision engine | Useful for visual exploration, not a full firewall simulation |
 | Protocol and port fields are not evaluated | Per-service conclusions may be inaccurate |
-| No persistence | Device mappings and edited config are lost on page reload |
+| Browser-local persistence | Saved state is per browser/profile and is not portable without a future import/export feature |
 | CDN dependency | Graph rendering depends on external script availability |
 | No automated tests | Behaviour is currently verified manually |
 
@@ -356,68 +359,61 @@ The example is useful for demonstrating the relationship views, but it should no
 
 ### Phase A: Persistence
 
-Add browser persistence with `localStorage`.
+Status: implemented.
 
-Store:
+The app saves session state to `localStorage` after parsing, device changes, graph layout/filter changes, and path-test selection changes.
+
+Stored fields:
 
 - Firewall config text.
 - Device list.
 - Selected graph layout.
 - Selected graph filter.
-- Last tested source and destination device.
+- Last tested source and destination device indexes.
 
-Implementation notes:
+Relevant functions:
 
-- Add `saveToLocalStorage()`.
-- Add `loadFromLocalStorage()`.
-- Save after parsing and after device changes.
-- Load before the initial render in `main()`.
+- `saveToLocalStorage()`.
+- `loadFromLocalStorage()`.
+- `readStoredState()`.
+- `normaliseSavedDevices()`.
+- `normaliseSavedTestPath()`.
 
 ### Phase B: Reactive Updates
 
-Reduce explicit button clicks by making the page respond to input changes.
+Status: implemented.
 
-Implementation notes:
+The app now responds to input changes while keeping the explicit buttons as manual controls.
 
-- Add a debounced `input` handler for the firewall textarea.
-- Keep the manual "Parse Firewall" button as an explicit recovery path for large configs.
-- Re-test the selected device path when either selector changes.
-- Batch expensive graph renders behind the debounce.
+Implemented behaviour:
 
-Example pattern:
+- The firewall textarea has a debounced `input` handler.
+- The "Parse Firewall" button remains available.
+- The selected device path re-tests when either selector changes.
+- Parse/render changes are persisted automatically when `localStorage` is available.
 
-```javascript
-function debounce(fn, delay) {
-	let timeoutId = null;
+Relevant functions:
 
-	return function debounced(...args) {
-		window.clearTimeout(timeoutId);
-		timeoutId = window.setTimeout(() => fn.apply(this, args), delay);
-	};
-}
-
-const autoParse = debounce(() => {
-	parseAndRender();
-	saveToLocalStorage();
-}, 500);
-```
+- `debounce()`.
+- `autoParse`.
+- `bindReactiveControls()`.
+- `handleTestSelectorChange()`.
+- `renderCurrentTestResult()`.
 
 ### Phase C: Project Metadata
 
-Add a small footer with repository and version metadata.
+Status: implemented.
 
-Include:
+The page footer shows:
 
 - GitHub repository link.
 - Current year from `new Date().getFullYear()`.
-- Optional static version or build date.
 
-Implementation notes:
+Relevant functions and elements:
 
-- Add footer markup before `</body>`.
-- Add footer styling to the inline stylesheet.
-- Add `setCurrentYear()` and call it from `main()`.
-- Use the real repository URL rather than a placeholder.
+- `.site-footer`.
+- `#currentYear`.
+- `setCurrentYear()`.
 
 ### Phase D: Rule Engine Accuracy
 

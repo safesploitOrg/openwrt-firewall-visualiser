@@ -1,0 +1,1382 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>OpenWRT Firewall Relationship Visualiser</title>
+
+	<script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+
+	<style>
+		:root {
+			--bg: #0f172a;
+			--bg-dark: #020617;
+			--panel: #111827;
+			--panel-soft: #1f2937;
+			--border: #374151;
+			--text: #e5e7eb;
+			--muted: #9ca3af;
+			--good: #22c55e;
+			--bad: #ef4444;
+			--warn: #f59e0b;
+			--info: #38bdf8;
+			--purple: #a78bfa;
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		body {
+			margin: 0;
+			font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+			background: var(--bg);
+			color: var(--text);
+		}
+
+		header {
+			background: var(--bg-dark);
+			border-bottom: 1px solid var(--border);
+			padding: 1rem 1.5rem;
+		}
+
+		header h1 {
+			margin: 0;
+			font-size: 1.45rem;
+		}
+
+		header p {
+			margin: 0.35rem 0 0;
+			color: var(--muted);
+		}
+
+		main {
+			display: grid;
+			grid-template-columns: 430px 1fr;
+			gap: 1rem;
+			padding: 1rem;
+		}
+
+		.panel {
+			background: var(--panel);
+			border: 1px solid var(--border);
+			border-radius: 14px;
+			padding: 1rem;
+		}
+
+		h2, h3 {
+			margin: 0 0 0.75rem;
+		}
+
+		textarea {
+			width: 100%;
+			min-height: 300px;
+			background: var(--bg-dark);
+			color: var(--text);
+			border: 1px solid var(--border);
+			border-radius: 10px;
+			padding: 0.75rem;
+			font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+			font-size: 0.85rem;
+			resize: vertical;
+		}
+
+		button,
+		input,
+		select {
+			background: var(--panel-soft);
+			color: var(--text);
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			padding: 0.55rem 0.7rem;
+		}
+
+		button {
+			cursor: pointer;
+			font-weight: 700;
+		}
+
+		button:hover {
+			border-color: var(--info);
+		}
+
+		input {
+			min-width: 0;
+		}
+
+		.controls {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0.5rem;
+			margin: 0.75rem 0;
+		}
+
+		.help-row {
+			display: flex;
+			align-items: centre;
+			justify-content: space-between;
+			gap: 0.75rem;
+			margin-bottom: 0.5rem;
+		}
+
+		.help-btn {
+			width: 1.8rem;
+			height: 1.8rem;
+			padding: 0;
+			border-radius: 999px;
+		}
+
+		.help-box {
+			margin: 0.75rem 0;
+			padding: 0.75rem;
+			background: var(--bg-dark);
+			border: 1px solid var(--border);
+			border-radius: 10px;
+			color: var(--muted);
+			font-size: 0.9rem;
+		}
+
+		.hidden {
+			display: none;
+		}
+
+		code,
+		pre {
+			background: #111827;
+			color: var(--text);
+			border-radius: 6px;
+		}
+
+		code {
+			padding: 0.15rem 0.35rem;
+		}
+
+		pre {
+			padding: 0.75rem;
+			overflow-x: auto;
+		}
+
+		.small {
+			color: var(--muted);
+			font-size: 0.85rem;
+		}
+
+		.summary-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+			gap: 0.75rem;
+			margin-bottom: 1rem;
+		}
+
+		.summary-card {
+			background: var(--bg-dark);
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			padding: 0.75rem;
+		}
+
+		.summary-card strong {
+			font-size: 1.35rem;
+			display: block;
+		}
+
+		.zone-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+			gap: 1rem;
+		}
+
+		.zone-card {
+			background: var(--bg-dark);
+			border: 1px solid var(--border);
+			border-radius: 14px;
+			padding: 1rem;
+		}
+
+		.zone-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			gap: 0.5rem;
+		}
+
+		.badge {
+			font-size: 0.72rem;
+			color: var(--muted);
+			background: var(--panel-soft);
+			border: 1px solid var(--border);
+			padding: 0.2rem 0.45rem;
+			border-radius: 999px;
+		}
+
+		.device {
+			margin: 0.4rem 0;
+			padding: 0.55rem;
+			border-radius: 10px;
+			background: var(--panel-soft);
+			border: 1px solid transparent;
+		}
+
+		.device strong {
+			display: block;
+		}
+
+		.device.iot-risk {
+			border-color: var(--warn);
+		}
+
+		.matrix {
+			width: 100%;
+			border-collapse: collapse;
+			margin-top: 0.75rem;
+			font-size: 0.85rem;
+		}
+
+		.matrix th,
+		.matrix td {
+			border: 1px solid var(--border);
+			padding: 0.5rem;
+			text-align: center;
+		}
+
+		.allow {
+			color: var(--good);
+			font-weight: 800;
+		}
+
+		.deny {
+			color: var(--bad);
+			font-weight: 800;
+		}
+
+		.warn {
+			color: var(--warn);
+			font-weight: 800;
+		}
+
+		.info {
+			color: var(--info);
+			font-weight: 800;
+		}
+
+		.result {
+			margin-top: 0.75rem;
+			padding: 0.75rem;
+			border-radius: 10px;
+			background: var(--bg-dark);
+			border: 1px solid var(--border);
+		}
+
+		.relationships {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+			gap: 0.75rem;
+			margin-top: 0.75rem;
+		}
+
+		.relationship {
+			background: var(--bg-dark);
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			padding: 0.75rem;
+		}
+
+		.relationship.allowed {
+			border-color: rgba(34, 197, 94, 0.55);
+		}
+
+		.relationship.blocked {
+			border-color: rgba(239, 68, 68, 0.55);
+		}
+
+		.device-row {
+			display: grid;
+			grid-template-columns: 1.1fr 1fr 0.8fr auto;
+			gap: 0.4rem;
+			margin: 0.4rem 0;
+		}
+
+		.graph-panel {
+			margin-top: 1.5rem;
+		}
+
+		.graph-toolbar {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0.5rem;
+			margin-bottom: 0.75rem;
+		}
+
+		#cy {
+			width: 100%;
+			height: 620px;
+			background: var(--bg-dark);
+			border: 1px solid var(--border);
+			border-radius: 14px;
+		}
+
+		.legend {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0.75rem;
+			margin: 0.75rem 0;
+			color: var(--muted);
+			font-size: 0.85rem;
+		}
+
+		.legend-item {
+			display: inline-flex;
+			align-items: center;
+			gap: 0.35rem;
+		}
+
+		.legend-dot {
+			width: 0.8rem;
+			height: 0.8rem;
+			border-radius: 999px;
+			display: inline-block;
+		}
+
+		.legend-line {
+			width: 1.5rem;
+			height: 0.2rem;
+			border-radius: 999px;
+			display: inline-block;
+		}
+
+		@media (max-width: 1150px) {
+			main {
+				grid-template-columns: 1fr;
+			}
+		}
+
+		@media (max-width: 720px) {
+			.device-row {
+				grid-template-columns: 1fr;
+			}
+
+			#cy {
+				height: 520px;
+			}
+		}
+	</style>
+</head>
+
+<body>
+	<header>
+		<h1>🔥 OpenWRT Firewall Relationship Visualiser</h1>
+		<p>Paste `/etc/config/firewall`, map devices to zones, then visualise subnet and device relationships.</p>
+	</header>
+
+	<main>
+		<section class="panel">
+			<div class="help-row">
+				<h2>📥 Firewall Config</h2>
+				<button class="help-btn" type="button" onclick="toggleHelp()">?</button>
+			</div>
+
+			<div id="helpBox" class="help-box hidden">
+				<strong>Recommended source file:</strong>
+				<code>/etc/config/firewall</code>
+
+				<p>On OpenWRT, run:</p>
+				<pre>cat /etc/config/firewall</pre>
+
+				<p>Then paste the output below.</p>
+
+				<p>Alternative:</p>
+				<pre>scp root@172.16.0.1:/etc/config/firewall ./openwrt-firewall.conf</pre>
+
+				<p class="small">
+					This webpage does not SSH into your router. It only parses text you paste or upload locally.
+				</p>
+			</div>
+
+			<textarea id="firewallInput" spellcheck="false"></textarea>
+
+			<div class="controls">
+				<button onclick="loadExample()">Load Example</button>
+				<button onclick="parseAndRender()">Parse Firewall</button>
+				<input type="file" id="configFile" accept=".txt,.conf,.firewall" onchange="loadConfigFile(event)" />
+			</div>
+
+			<hr style="border-color: var(--border); margin: 1rem 0;">
+
+			<h2>📡 Devices / Subnet Mapping</h2>
+			<p class="small">
+				Map real devices to firewall zones. This is what makes the visualiser useful for IoT/Alexa-style checks.
+			</p>
+
+			<div class="controls">
+				<button onclick="addDevice()">Add Device</button>
+				<button onclick="resetDevices()">Reset Devices</button>
+			</div>
+
+			<div id="deviceInputs"></div>
+		</section>
+
+		<section class="panel">
+			<h2>📊 Summary</h2>
+			<div id="summaryView" class="summary-grid"></div>
+
+			<section class="graph-panel">
+				<h2>🕸️ Graph Visualiser</h2>
+
+				<div class="legend">
+					<span class="legend-item">
+						<span class="legend-dot" style="background: var(--info);"></span>
+						Zone
+					</span>
+					<span class="legend-item">
+						<span class="legend-dot" style="background: var(--purple);"></span>
+						Device
+					</span>
+					<span class="legend-item">
+						<span class="legend-line" style="background: var(--good);"></span>
+						Allowed
+					</span>
+					<span class="legend-item">
+						<span class="legend-line" style="background: var(--bad);"></span>
+						Blocked
+					</span>
+					<span class="legend-item">
+						<span class="legend-line" style="background: var(--muted);"></span>
+						Device belongs to zone
+					</span>
+				</div>
+
+				<div class="graph-toolbar">
+					<button onclick="renderGraph('cose')">Physics Layout</button>
+					<button onclick="renderGraph('circle')">Circle Layout</button>
+					<button onclick="renderGraph('breadthfirst')">Layered Layout</button>
+					<button onclick="fitGraph()">Fit Graph</button>
+					<select id="graphFilter" onchange="renderGraph()">
+						<option value="all">Show all relationships</option>
+						<option value="allowed">Allowed only</option>
+						<option value="blocked">Blocked only</option>
+						<option value="zones">Zone relationships only</option>
+						<option value="devices">Device relationships only</option>
+					</select>
+				</div>
+
+				<div id="cy"></div>
+			</section>
+
+			<h2 style="margin-top: 1.5rem;">🧭 Zone + Device View</h2>
+			<div id="zoneView" class="zone-grid"></div>
+
+			<h2 style="margin-top: 1.5rem;">🔐 Zone Connectivity Matrix</h2>
+			<div id="matrixView"></div>
+
+			<h2 style="margin-top: 1.5rem;">🧪 Device Relationship Test</h2>
+			<div class="controls">
+				<select id="srcDevice"></select>
+				<span>➡️</span>
+				<select id="dstDevice"></select>
+				<button onclick="testDevicePath()">Test Path</button>
+			</div>
+			<div id="testResult" class="result small">Select two devices and test whether traffic is allowed.</div>
+
+			<h2 style="margin-top: 1.5rem;">🔎 Device Relationship Map</h2>
+			<div id="relationshipView" class="relationships"></div>
+		</section>
+	</main>
+
+	<script>
+		const EXAMPLE_FIREWALL = `config zone
+	option name 'lan'
+	option input 'ACCEPT'
+	option output 'ACCEPT'
+	option forward 'ACCEPT'
+	list network 'lan'
+
+config zone
+	option name 'iot'
+	option input 'REJECT'
+	option output 'ACCEPT'
+	option forward 'REJECT'
+	list network 'iot'
+
+config zone
+	option name 'guest'
+	option input 'REJECT'
+	option output 'ACCEPT'
+	option forward 'REJECT'
+	list network 'guest'
+
+config zone
+	option name 'wan'
+	option input 'REJECT'
+	option output 'ACCEPT'
+	option forward 'REJECT'
+	option masq '1'
+	list network 'wan'
+
+config forwarding
+	option src 'lan'
+	option dest 'wan'
+
+config forwarding
+	option src 'iot'
+	option dest 'wan'
+
+config forwarding
+	option src 'guest'
+	option dest 'wan'
+
+config rule
+	option name 'Allow-Alexa-to-Alexa'
+	option src 'iot'
+	option dest 'iot'
+	option src_ip '172.16.20.10'
+	option dest_ip '172.16.20.11'
+	option target 'ACCEPT'
+
+config rule
+	option name 'Block-IoT-East-West'
+	option src 'iot'
+	option dest 'iot'
+	option target 'REJECT'`;
+
+		const DEFAULT_DEVICES = [
+			{ name: "Admin Laptop", ip: "172.16.10.20", zone: "lan" },
+			{ name: "Alexa Kitchen", ip: "172.16.20.10", zone: "iot" },
+			{ name: "Alexa Bedroom", ip: "172.16.20.11", zone: "iot" },
+			{ name: "IoT Camera", ip: "172.16.20.50", zone: "iot" },
+			{ name: "Guest Phone", ip: "172.16.30.25", zone: "guest" }
+		];
+
+		let devices = structuredClone(DEFAULT_DEVICES);
+
+		let firewallModel = {
+			zones: {},
+			forwardings: [],
+			rules: []
+		};
+
+		let cy = null;
+		let currentLayout = "cose";
+
+		function main() {
+			document.getElementById("firewallInput").value = EXAMPLE_FIREWALL;
+			renderDeviceInputs();
+			parseAndRender();
+		}
+
+		function toggleHelp() {
+			document.getElementById("helpBox").classList.toggle("hidden");
+		}
+
+		function loadExample() {
+			document.getElementById("firewallInput").value = EXAMPLE_FIREWALL;
+			devices = structuredClone(DEFAULT_DEVICES);
+			renderDeviceInputs();
+			parseAndRender();
+		}
+
+		function loadConfigFile(event) {
+			const file = event.target.files[0];
+
+			if (!file) {
+				return;
+			}
+
+			const reader = new FileReader();
+
+			reader.onload = function(e) {
+				document.getElementById("firewallInput").value = e.target.result;
+				parseAndRender();
+			};
+
+			reader.readAsText(file);
+		}
+
+		function addDevice() {
+			devices.push({
+				name: "New Device",
+				ip: "172.16.x.x",
+				zone: "iot"
+			});
+
+			renderDeviceInputs();
+			parseAndRender();
+		}
+
+		function resetDevices() {
+			devices = structuredClone(DEFAULT_DEVICES);
+			renderDeviceInputs();
+			parseAndRender();
+		}
+
+		function renderDeviceInputs() {
+			const container = document.getElementById("deviceInputs");
+			container.innerHTML = "";
+
+			devices.forEach((device, index) => {
+				const row = document.createElement("div");
+				row.className = "device-row";
+
+				row.innerHTML = `
+					<input value="${escapeHtml(device.name)}" onchange="updateDevice(${index}, 'name', this.value)" placeholder="Device name">
+					<input value="${escapeHtml(device.ip)}" onchange="updateDevice(${index}, 'ip', this.value)" placeholder="IP address">
+					<input value="${escapeHtml(device.zone)}" onchange="updateDevice(${index}, 'zone', this.value)" placeholder="Zone">
+					<button onclick="removeDevice(${index})">Remove</button>
+				`;
+
+				container.appendChild(row);
+			});
+
+			renderDeviceSelectors();
+		}
+
+		function updateDevice(index, key, value) {
+			devices[index][key] = value.trim();
+			parseAndRender();
+		}
+
+		function removeDevice(index) {
+			devices.splice(index, 1);
+			renderDeviceInputs();
+			parseAndRender();
+		}
+
+		function parseAndRender() {
+			const configText = document.getElementById("firewallInput").value;
+			firewallModel = parseOpenWrtFirewall(configText);
+
+			renderSummary();
+			renderGraph();
+			renderZoneView();
+			renderMatrix();
+			renderDeviceSelectors();
+			renderRelationshipMap();
+		}
+
+		function parseOpenWrtFirewall(text) {
+			const sections = [];
+			let current = null;
+
+			text.split(/\r?\n/).forEach((line) => {
+				const trimmed = line.trim();
+
+				if (!trimmed || trimmed.startsWith("#")) {
+					return;
+				}
+
+				const configMatch = trimmed.match(/^config\s+(\S+)(?:\s+'?([^']+)'?)?/);
+
+				if (configMatch) {
+					current = {
+						type: configMatch[1],
+						name: configMatch[2] || "",
+						options: {},
+						lists: {}
+					};
+
+					sections.push(current);
+					return;
+				}
+
+				if (!current) {
+					return;
+				}
+
+				const optionMatch = trimmed.match(/^option\s+(\S+)\s+'?([^']*)'?/);
+				const listMatch = trimmed.match(/^list\s+(\S+)\s+'?([^']*)'?/);
+
+				if (optionMatch) {
+					current.options[optionMatch[1]] = optionMatch[2];
+				}
+
+				if (listMatch) {
+					const key = listMatch[1];
+
+					if (!current.lists[key]) {
+						current.lists[key] = [];
+					}
+
+					current.lists[key].push(listMatch[2]);
+				}
+			});
+
+			const model = {
+				zones: {},
+				forwardings: [],
+				rules: []
+			};
+
+			sections.forEach((section) => {
+				if (section.type === "zone") {
+					const zoneName = section.options.name || section.name;
+
+					model.zones[zoneName] = {
+						name: zoneName,
+						input: section.options.input || "REJECT",
+						output: section.options.output || "REJECT",
+						forward: section.options.forward || "REJECT",
+						networks: section.lists.network || []
+					};
+				}
+
+				if (section.type === "forwarding") {
+					model.forwardings.push({
+						src: section.options.src || "",
+						dest: section.options.dest || ""
+					});
+				}
+
+				if (section.type === "rule") {
+					model.rules.push({
+						name: section.options.name || section.name || "Unnamed rule",
+						src: section.options.src || "",
+						dest: section.options.dest || "",
+						srcIp: section.options.src_ip || "",
+						destIp: section.options.dest_ip || "",
+						proto: section.options.proto || "",
+						destPort: section.options.dest_port || "",
+						target: section.options.target || ""
+					});
+				}
+			});
+
+			return model;
+		}
+
+		function renderSummary() {
+			const zoneCount = Object.keys(firewallModel.zones).length;
+			const forwardingCount = firewallModel.forwardings.length;
+			const ruleCount = firewallModel.rules.length;
+			const deviceCount = devices.length;
+
+			document.getElementById("summaryView").innerHTML = `
+				<div class="summary-card">
+					<strong>${zoneCount}</strong>
+					<span class="small">Firewall zones</span>
+				</div>
+				<div class="summary-card">
+					<strong>${forwardingCount}</strong>
+					<span class="small">Zone forwardings</span>
+				</div>
+				<div class="summary-card">
+					<strong>${ruleCount}</strong>
+					<span class="small">Traffic rules</span>
+				</div>
+				<div class="summary-card">
+					<strong>${deviceCount}</strong>
+					<span class="small">Mapped devices</span>
+				</div>
+			`;
+		}
+
+		function renderZoneView() {
+			const container = document.getElementById("zoneView");
+			container.innerHTML = "";
+
+			const zones = Object.values(firewallModel.zones);
+
+			if (zones.length === 0) {
+				container.innerHTML = `<p class="small">No zones detected. Paste an OpenWRT firewall config and click Parse.</p>`;
+				return;
+			}
+
+			zones.forEach((zone) => {
+				const zoneDevices = devices.filter((device) => device.zone === zone.name);
+
+				const card = document.createElement("div");
+				card.className = "zone-card";
+
+				card.innerHTML = `
+					<div class="zone-header">
+						<h3>${escapeHtml(zone.name)}</h3>
+						<span class="badge">${escapeHtml(zone.networks.join(", ") || "no network")}</span>
+					</div>
+
+					<p class="small">
+						Input: <strong>${escapeHtml(zone.input)}</strong> |
+						Output: <strong>${escapeHtml(zone.output)}</strong> |
+						Forward: <strong>${escapeHtml(zone.forward)}</strong>
+					</p>
+
+					${zoneDevices.map((device) => {
+						const riskClass = zone.name.toLowerCase().includes("iot") ? "iot-risk" : "";
+
+						return `
+							<div class="device ${riskClass}">
+								<strong>📱 ${escapeHtml(device.name)}</strong>
+								<span class="small">${escapeHtml(device.ip)}</span>
+							</div>
+						`;
+					}).join("") || `<p class="small">No devices mapped to this zone.</p>`}
+				`;
+
+				container.appendChild(card);
+			});
+		}
+
+		function renderMatrix() {
+			const zones = Object.keys(firewallModel.zones);
+			const container = document.getElementById("matrixView");
+
+			if (zones.length === 0) {
+				container.innerHTML = `<p class="small">No zones detected.</p>`;
+				return;
+			}
+
+			let html = `<table class="matrix"><thead><tr><th>From / To</th>`;
+
+			zones.forEach((zone) => {
+				html += `<th>${escapeHtml(zone)}</th>`;
+			});
+
+			html += `</tr></thead><tbody>`;
+
+			zones.forEach((src) => {
+				html += `<tr><th>${escapeHtml(src)}</th>`;
+
+				zones.forEach((dest) => {
+					const decision = evaluateZonePath(src, dest);
+					html += `<td class="${decision.allowed ? "allow" : "deny"}">${decision.allowed ? "ALLOW" : "DENY"}</td>`;
+				});
+
+				html += `</tr>`;
+			});
+
+			html += `</tbody></table>`;
+			container.innerHTML = html;
+		}
+
+		function renderDeviceSelectors() {
+			const srcSelect = document.getElementById("srcDevice");
+			const dstSelect = document.getElementById("dstDevice");
+
+			if (!srcSelect || !dstSelect) {
+				return;
+			}
+
+			const options = devices.map((device, index) => {
+				return `<option value="${index}">${escapeHtml(device.name)} (${escapeHtml(device.zone)})</option>`;
+			}).join("");
+
+			srcSelect.innerHTML = options;
+			dstSelect.innerHTML = options;
+
+			if (devices.length > 1) {
+				dstSelect.selectedIndex = 1;
+			}
+		}
+
+		function renderRelationshipMap() {
+			const container = document.getElementById("relationshipView");
+			container.innerHTML = "";
+
+			if (devices.length < 2) {
+				container.innerHTML = `<p class="small">Add at least two devices to see relationships.</p>`;
+				return;
+			}
+
+			const relationships = buildDeviceRelationships();
+
+			relationships.forEach((item) => {
+				const div = document.createElement("div");
+				div.className = `relationship ${item.decision.allowed ? "allowed" : "blocked"}`;
+
+				div.innerHTML = `
+					<strong>${item.decision.allowed ? "✅ ALLOWED" : "⛔ BLOCKED"}</strong>
+					<p>
+						${escapeHtml(item.src.name)}
+						<span class="small">(${escapeHtml(item.src.zone)} / ${escapeHtml(item.src.ip)})</span>
+						<br>
+						➡️ ${escapeHtml(item.dst.name)}
+						<span class="small">(${escapeHtml(item.dst.zone)} / ${escapeHtml(item.dst.ip)})</span>
+					</p>
+					<p class="small">${escapeHtml(item.decision.reason)}</p>
+				`;
+
+				container.appendChild(div);
+			});
+		}
+
+		function renderGraph(layoutName = null) {
+			if (layoutName) {
+				currentLayout = layoutName;
+			}
+
+			const elements = buildGraphElements();
+			const container = document.getElementById("cy");
+
+			if (!window.cytoscape) {
+				container.innerHTML = "Cytoscape.js failed to load. Check internet/CDN access.";
+				return;
+			}
+
+			if (cy) {
+				cy.destroy();
+			}
+
+			cy = cytoscape({
+				container,
+				elements,
+				style: [
+					{
+						selector: "node",
+						style: {
+							"label": "data(label)",
+							"text-valign": "center",
+							"text-halign": "center",
+							"color": "#e5e7eb",
+							"font-size": "11px",
+							"text-wrap": "wrap",
+							"text-max-width": "95px",
+							"border-width": 2,
+							"border-color": "#374151",
+							"background-color": "#64748b",
+							"width": 62,
+							"height": 62
+						}
+					},
+					{
+						selector: "node[type = 'zone']",
+						style: {
+							"shape": "round-rectangle",
+							"background-color": "#0284c7",
+							"width": 95,
+							"height": 55,
+							"font-weight": "700"
+						}
+					},
+					{
+						selector: "node[type = 'device']",
+						style: {
+							"shape": "ellipse",
+							"background-color": "#7c3aed",
+							"width": 72,
+							"height": 72
+						}
+					},
+					{
+						selector: "edge",
+						style: {
+							"label": "data(label)",
+							"font-size": "9px",
+							"color": "#9ca3af",
+							"text-background-color": "#020617",
+							"text-background-opacity": 0.85,
+							"text-background-padding": "3px",
+							"curve-style": "bezier",
+							"target-arrow-shape": "triangle",
+							"target-arrow-color": "#9ca3af",
+							"line-color": "#9ca3af",
+							"width": 2
+						}
+					},
+					{
+						selector: "edge[type = 'membership']",
+						style: {
+							"line-color": "#64748b",
+							"target-arrow-color": "#64748b",
+							"line-style": "dotted",
+							"label": "in zone",
+							"width": 1.5
+						}
+					},
+					{
+						selector: "edge[decision = 'allowed']",
+						style: {
+							"line-color": "#22c55e",
+							"target-arrow-color": "#22c55e",
+							"width": 3
+						}
+					},
+					{
+						selector: "edge[decision = 'blocked']",
+						style: {
+							"line-color": "#ef4444",
+							"target-arrow-color": "#ef4444",
+							"line-style": "dashed",
+							"width": 2
+						}
+					},
+					{
+						selector: ".highlighted",
+						style: {
+							"border-color": "#facc15",
+							"border-width": 4
+						}
+					},
+					{
+						selector: ".faded",
+						style: {
+							"opacity": 0.22
+						}
+					}
+				],
+				layout: getGraphLayout(currentLayout),
+				wheelSensitivity: 0.2
+			});
+
+			cy.on("tap", "node", function(event) {
+				highlightNodeRelationships(event.target);
+			});
+
+			cy.on("tap", function(event) {
+				if (event.target === cy) {
+					cy.elements().removeClass("highlighted faded");
+				}
+			});
+		}
+
+		function buildGraphElements() {
+			const filter = document.getElementById("graphFilter")?.value || "all";
+			const elements = [];
+			const zones = Object.values(firewallModel.zones);
+
+			zones.forEach((zone) => {
+				elements.push({
+					data: {
+						id: zoneNodeId(zone.name),
+						label: `Zone: ${zone.name}`,
+						type: "zone",
+						rawName: zone.name
+					}
+				});
+			});
+
+			devices.forEach((device, index) => {
+				elements.push({
+					data: {
+						id: deviceNodeId(index),
+						label: `${device.name}\n${device.ip}`,
+						type: "device",
+						rawName: device.name,
+						zone: device.zone,
+						ip: device.ip
+					}
+				});
+			});
+
+			if (filter === "all" || filter === "zones") {
+				buildZoneRelationshipEdges().forEach((edge) => {
+					if (filterEdge(edge, filter)) {
+						elements.push(edge);
+					}
+				});
+			}
+
+			if (filter === "all" || filter === "devices" || filter === "allowed" || filter === "blocked") {
+				buildDeviceRelationshipEdges().forEach((edge) => {
+					if (filterEdge(edge, filter)) {
+						elements.push(edge);
+					}
+				});
+			}
+
+			if (filter === "all" || filter === "zones" || filter === "devices") {
+				devices.forEach((device, index) => {
+					if (!firewallModel.zones[device.zone]) {
+						return;
+					}
+
+					elements.push({
+						data: {
+							id: `membership-${index}`,
+							source: deviceNodeId(index),
+							target: zoneNodeId(device.zone),
+							type: "membership",
+							decision: "membership",
+							label: "in zone"
+						}
+					});
+				});
+			}
+
+			return elements;
+		}
+
+		function buildZoneRelationshipEdges() {
+			const edges = [];
+			const zones = Object.keys(firewallModel.zones);
+
+			zones.forEach((src) => {
+				zones.forEach((dst) => {
+					if (src === dst) {
+						return;
+					}
+
+					const decision = evaluateZonePath(src, dst);
+
+					edges.push({
+						data: {
+							id: `zone-${src}-to-${dst}`,
+							source: zoneNodeId(src),
+							target: zoneNodeId(dst),
+							type: "zone-relationship",
+							decision: decision.allowed ? "allowed" : "blocked",
+							label: decision.allowed ? "ALLOW" : "DENY",
+							reason: decision.reason
+						}
+					});
+				});
+			});
+
+			return edges;
+		}
+
+		function buildDeviceRelationshipEdges() {
+			const edges = [];
+			const relationships = buildDeviceRelationships();
+
+			relationships.forEach((item, index) => {
+				edges.push({
+					data: {
+						id: `device-${index}`,
+						source: deviceNodeId(item.srcIndex),
+						target: deviceNodeId(item.dstIndex),
+						type: "device-relationship",
+						decision: item.decision.allowed ? "allowed" : "blocked",
+						label: item.decision.allowed ? "ALLOW" : "DENY",
+						reason: item.decision.reason
+					}
+				});
+			});
+
+			return edges;
+		}
+
+		function buildDeviceRelationships() {
+			const relationships = [];
+
+			devices.forEach((src, srcIndex) => {
+				devices.forEach((dst, dstIndex) => {
+					if (srcIndex === dstIndex) {
+						return;
+					}
+
+					const decision = evaluateDevicePath(src, dst);
+
+					relationships.push({
+						src,
+						dst,
+						srcIndex,
+						dstIndex,
+						decision
+					});
+				});
+			});
+
+			return relationships;
+		}
+
+		function filterEdge(edge, filter) {
+			if (filter === "all") {
+				return true;
+			}
+
+			if (filter === "allowed") {
+				return edge.data.decision === "allowed";
+			}
+
+			if (filter === "blocked") {
+				return edge.data.decision === "blocked";
+			}
+
+			if (filter === "zones") {
+				return edge.data.type === "zone-relationship" || edge.data.type === "membership";
+			}
+
+			if (filter === "devices") {
+				return edge.data.type === "device-relationship" || edge.data.type === "membership";
+			}
+
+			return true;
+		}
+
+		function getGraphLayout(layoutName) {
+			if (layoutName === "circle") {
+				return {
+					name: "circle",
+					padding: 50,
+					animate: true
+				};
+			}
+
+			if (layoutName === "breadthfirst") {
+				return {
+					name: "breadthfirst",
+					directed: true,
+					padding: 50,
+					spacingFactor: 1.25,
+					animate: true
+				};
+			}
+
+			return {
+				name: "cose",
+				padding: 50,
+				animate: true,
+				nodeRepulsion: 9000,
+				idealEdgeLength: 120,
+				edgeElasticity: 120,
+				gravity: 0.25,
+				numIter: 1200
+			};
+		}
+
+		function fitGraph() {
+			if (!cy) {
+				return;
+			}
+
+			cy.fit(undefined, 50);
+		}
+
+		function highlightNodeRelationships(node) {
+			const connectedEdges = node.connectedEdges();
+			const connectedNodes = connectedEdges.connectedNodes();
+
+			cy.elements().addClass("faded");
+			node.removeClass("faded").addClass("highlighted");
+			connectedEdges.removeClass("faded").addClass("highlighted");
+			connectedNodes.removeClass("faded").addClass("highlighted");
+		}
+
+		function testDevicePath() {
+			const srcIndex = document.getElementById("srcDevice").value;
+			const dstIndex = document.getElementById("dstDevice").value;
+
+			const src = devices[srcIndex];
+			const dst = devices[dstIndex];
+
+			if (!src || !dst) {
+				return;
+			}
+
+			const decision = evaluateDevicePath(src, dst);
+
+			document.getElementById("testResult").innerHTML = `
+				<strong class="${decision.allowed ? "allow" : "deny"}">
+					${decision.allowed ? "✅ ALLOWED" : "⛔ BLOCKED"}
+				</strong>
+				<br>
+				${escapeHtml(src.name)} (${escapeHtml(src.ip)} / ${escapeHtml(src.zone)})
+				➡️
+				${escapeHtml(dst.name)} (${escapeHtml(dst.ip)} / ${escapeHtml(dst.zone)})
+				<br>
+				<span class="small">${escapeHtml(decision.reason)}</span>
+			`;
+
+			highlightTestedPath(Number(srcIndex), Number(dstIndex));
+		}
+
+		function highlightTestedPath(srcIndex, dstIndex) {
+			if (!cy) {
+				return;
+			}
+
+			const srcId = deviceNodeId(srcIndex);
+			const dstId = deviceNodeId(dstIndex);
+
+			const edge = cy.edges().filter((item) => {
+				return item.source().id() === srcId && item.target().id() === dstId;
+			});
+
+			cy.elements().addClass("faded");
+			cy.getElementById(srcId).removeClass("faded").addClass("highlighted");
+			cy.getElementById(dstId).removeClass("faded").addClass("highlighted");
+			edge.removeClass("faded").addClass("highlighted");
+		}
+
+		function evaluateDevicePath(srcDevice, dstDevice) {
+			const matchingSpecificRule = findMatchingSpecificRule(srcDevice, dstDevice);
+
+			if (matchingSpecificRule) {
+				return {
+					allowed: normaliseTarget(matchingSpecificRule.target) === "ACCEPT",
+					reason: `Matched specific rule: ${matchingSpecificRule.name} (${matchingSpecificRule.target})`
+				};
+			}
+
+			const zoneDecision = evaluateZonePath(srcDevice.zone, dstDevice.zone);
+
+			return {
+				allowed: zoneDecision.allowed,
+				reason: zoneDecision.reason
+			};
+		}
+
+		function evaluateZonePath(srcZone, dstZone) {
+			if (srcZone === dstZone) {
+				const zone = firewallModel.zones[srcZone];
+
+				if (!zone) {
+					return {
+						allowed: false,
+						reason: `Unknown zone: ${srcZone}`
+					};
+				}
+
+				return {
+					allowed: normaliseTarget(zone.forward) === "ACCEPT",
+					reason: `Same-zone traffic uses the '${srcZone}' forward policy (${zone.forward})`
+				};
+			}
+
+			const forwarding = firewallModel.forwardings.find((item) => {
+				return item.src === srcZone && item.dest === dstZone;
+			});
+
+			if (forwarding) {
+				return {
+					allowed: true,
+					reason: `Zone forwarding exists: ${srcZone} → ${dstZone}`
+				};
+			}
+
+			return {
+				allowed: false,
+				reason: `No zone forwarding found: ${srcZone} → ${dstZone}`
+			};
+		}
+
+		function findMatchingSpecificRule(srcDevice, dstDevice) {
+			return firewallModel.rules.find((rule) => {
+				const srcZoneMatches = !rule.src || rule.src === srcDevice.zone;
+				const dstZoneMatches = !rule.dest || rule.dest === dstDevice.zone;
+				const srcIpMatches = !rule.srcIp || rule.srcIp === srcDevice.ip;
+				const dstIpMatches = !rule.destIp || rule.destIp === dstDevice.ip;
+
+				return srcZoneMatches && dstZoneMatches && srcIpMatches && dstIpMatches;
+			});
+		}
+
+		function zoneNodeId(zoneName) {
+			return `zone-${safeId(zoneName)}`;
+		}
+
+		function deviceNodeId(index) {
+			return `device-${index}`;
+		}
+
+		function safeId(value) {
+			return String(value)
+				.trim()
+				.toLowerCase()
+				.replace(/[^a-z0-9_-]/g, "-");
+		}
+
+		function normaliseTarget(value) {
+			return String(value || "").trim().toUpperCase();
+		}
+
+		function escapeHtml(value) {
+			return String(value)
+				.replaceAll("&", "&amp;")
+				.replaceAll("<", "&lt;")
+				.replaceAll(">", "&gt;")
+				.replaceAll('"', "&quot;")
+				.replaceAll("'", "&#039;");
+		}
+
+		main();
+	</script>
+</body>
+</html>

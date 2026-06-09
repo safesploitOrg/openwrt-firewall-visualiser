@@ -415,9 +415,197 @@ Relevant functions and elements:
 - `#currentYear`.
 - `setCurrentYear()`.
 
-### Phase D: Rule Engine Accuracy
+## Future Enhancements
 
-Improve decision accuracy before adding more visualisations.
+The following planned phases continue the roadmap sequence after implemented Phase A-C.
+
+### Phase D: Local Storage Lifecycle Management
+
+Status: planned.
+
+Objective: prevent stale browser state from living indefinitely while keeping the local-first workflow.
+
+Requirements:
+
+- Store a timestamp alongside all persisted `localStorage` data.
+- Automatically expire stored data after 45 days.
+- Remove expired data silently on application startup.
+- Fall back to the default example configuration when stored data has expired.
+- Handle corrupted `localStorage` data gracefully.
+- Preserve backwards compatibility where possible for existing saved payloads.
+
+Implementation notes:
+
+- Keep `STORAGE_KEY` as the stable state namespace.
+- Introduce `STORAGE_TTL_DAYS = 45`.
+- Store `savedAt` or equivalent metadata in the persisted payload.
+- Implement `saveState()`.
+- Implement `loadState()`.
+- Implement `clearExpiredState()`.
+- Call `clearExpiredState()` during startup before applying saved state.
+
+### Phase E: Graph Initial State Improvements
+
+Status: planned.
+
+Objective: improve first-load user experience by preventing automatic path highlighting.
+
+Requirements:
+
+- No device relationship should be highlighted on initial page load.
+- No graph nodes should be automatically selected on initial page load.
+- No path should be highlighted until the user explicitly clicks "Test Path".
+- No path should be highlighted until the user explicitly clicks a graph node.
+- No path should be highlighted until the user explicitly clicks a relationship entry.
+
+Implementation notes:
+
+- Separate path-result rendering from graph path highlighting.
+- Track whether the user has explicitly requested a path highlight.
+- Keep automatic path re-evaluation for text results, but defer graph highlighting until user action.
+
+### Phase F: Bulk Host Import
+
+Status: planned.
+
+Objective: allow users to populate devices from existing network inventories instead of manually adding hosts one at a time.
+
+Requirements:
+
+- Add a dedicated "Bulk Import Hosts" section.
+- Support device inventory exports.
+- Support host lists.
+- Support DHCP exports.
+- Support ARP tables.
+- Support neighbour tables.
+- Merge imported hosts into the existing device list without destroying manually entered devices.
+
+Supported preferred format:
+
+```text
+172.16.20.10 Alexa-Kitchen iot
+172.16.20.11 Alexa-Bedroom iot
+172.16.20.50 IoT-Camera iot
+172.16.30.25 Guest-Phone guest
+```
+
+Supported simplified format:
+
+```text
+Alexa-Kitchen 172.16.20.10 iot
+IoT-Camera 172.16.20.50 iot
+```
+
+Supported Linux neighbour table format:
+
+```text
+172.16.20.10 dev br-iot lladdr aa:bb:cc:dd:ee:ff REACHABLE
+172.16.20.11 dev br-iot lladdr aa:bb:cc:dd:ee:00 STALE
+```
+
+Implementation notes:
+
+- Create `importBulkHosts()`.
+- Create `parseBulkHosts()`.
+- Create `parseHostLine()`.
+- Create `mergeDevices()`.
+- Report skipped or unrecognised lines without blocking valid imports.
+
+Benefits:
+
+- Significantly reduces data entry effort.
+- Improves usability on larger networks.
+- Makes importing existing homelab inventories straightforward.
+
+### Phase G: Zone Inference Engine
+
+Status: planned.
+
+Objective: automatically assign firewall zones from subnet definitions when imported hosts do not include a zone.
+
+Requirements:
+
+- Allow users to define subnet-to-zone mappings.
+- Infer the zone for imported hosts by matching host IPs against the configured CIDR ranges.
+- Preserve explicitly supplied host zones over inferred zones.
+- Mark hosts as unresolved when no subnet mapping matches.
+
+Example subnet mappings:
+
+```text
+172.16.10.0/24 lan
+172.16.20.0/24 iot
+172.16.30.0/24 guest
+172.16.40.0/24 servers
+```
+
+Example imported host:
+
+```text
+172.16.20.50 IoT-Camera
+```
+
+Expected inferred result:
+
+```text
+zone = iot
+```
+
+Implementation notes:
+
+- Add a subnet mapping input area.
+- Parse CIDR notation into comparable network ranges.
+- Apply inference during bulk import and device normalisation.
+- Surface unresolved hosts so the user can assign zones manually.
+
+### Phase H: Network Discovery Importers
+
+Status: planned.
+
+Objective: support importing host data directly from common network tooling output.
+
+Initial import targets:
+
+- Linux `ip neighbour`.
+- Linux `arp -a`.
+- OpenWrt `ip neighbour`.
+- OpenWrt `cat /tmp/dhcp.leases`, preferably because it includes hostnames.
+
+Implementation notes:
+
+- Feed parsed importer output into the Phase F bulk host import path.
+- Prefer hostnames from DHCP lease data when available.
+- Fall back to IP-only device names when no hostname is present.
+- Preserve raw importer output for troubleshooting skipped lines.
+
+### Phase I: Relationship Analysis Engine
+
+Status: planned.
+
+Objective: move beyond visualisation and provide automated security analysis.
+
+Requirements:
+
+- Detect IoT east-west communication.
+- Detect guest-to-LAN exposure.
+- Detect guest-to-server exposure.
+- Detect server-to-IoT exposure.
+- Detect excessive zone trust.
+- Detect full-mesh communication patterns.
+- Detect zones with unrestricted forwarding.
+- Detect device exceptions that bypass segmentation.
+
+Implementation notes:
+
+- Build analysis rules on top of `evaluateZonePath()` and `evaluateDevicePath()`.
+- Return findings with severity, affected source, affected destination, and reason.
+- Add a findings panel before recommending changes.
+
+### Phase J: Rule Engine Accuracy
+
+Status: planned.
+
+Improve decision accuracy before adding policy recommendations.
 
 Candidate improvements:
 
@@ -428,7 +616,9 @@ Candidate improvements:
 - Surface unsupported rule fields in the UI.
 - Consider zone `input` and `output` policies where relevant.
 
-### Phase E: Import, Export, And Comparison
+### Phase K: Import, Export, And Comparison
+
+Status: planned.
 
 Add workflows for longer-lived analysis.
 

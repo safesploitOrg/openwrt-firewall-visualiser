@@ -1,527 +1,480 @@
-# Architecture: OpenWRT Firewall Relationship Visualiser
+# Architecture: OpenWrt Firewall Relationship Visualiser
 
 ## Project Overview
 
-**OpenWRT Firewall Relationship Visualiser** is an interactive web application that helps users understand complex firewall configurations by:
-- Parsing OpenWRT firewall configuration files (`/etc/config/firewall`)
-- Mapping real devices to firewall zones
-- Visualizing network relationships using graph diagrams
-- Testing device-to-device connectivity based on firewall rules
-- Displaying zone connectivity matrices and device relationship maps
+The OpenWrt Firewall Relationship Visualiser is a single-page browser application for exploring `/etc/config/firewall` relationships. It helps a user paste or upload an OpenWrt firewall configuration, map real devices to firewall zones, and inspect likely zone-to-zone and device-to-device reachability.
 
-The application runs entirely client-side with no server component—all parsing and analysis happens in the browser.
+The application is intentionally local-first:
+
+- Firewall text is parsed in the browser.
+- Device mappings are held in browser memory for the current session.
+- No backend, database, build step, or package manager is required.
+- The only runtime dependency is Cytoscape.js, loaded from a CDN for graph rendering.
+
+This is a visual analysis tool, not a full OpenWrt firewall simulator. The decision engine models the parts of the firewall that are useful for quick relationship checks, but it does not reproduce every fw3/fw4, nftables, iptables, NAT, conntrack, or bridge-level behaviour.
 
 ## Technology Stack
 
 | Layer | Technology |
-|-------|-----------|
-| **Rendering** | HTML5 + CSS3 (custom dark theme) |
-| **Interactivity** | Vanilla JavaScript (ES6+) |
-| **Graph Visualization** | Cytoscape.js (CDN-loaded) |
-| **Distribution** | Single HTML file (no build system) |
+| --- | --- |
+| Markup | HTML5 |
+| Styling | Inline CSS with custom properties and a dark theme |
+| Behaviour | Vanilla JavaScript |
+| Graph rendering | Cytoscape.js v3.30.4 from CDN |
+| Distribution | Static `public/index.html` |
 
 ## File Structure
 
-```
+```text
 openwrt-firewall-visualiser/
-├── README.md                  # Project documentation (currently empty)
-├── ARCHITECTURE.md            # This file
+├── README.md          # Placeholder project documentation
+├── ARCHITECTURE.md    # This architecture guide
 └── public/
-    └── index.html            # Complete single-file application
+    └── index.html     # Complete single-file application
 ```
 
-## Application Architecture
+## Runtime State
 
-### Single-Page Application (SPA) Design
+The app keeps a small amount of global state inside `public/index.html`:
 
-The entire application is contained in `public/index.html` with:
-- **Markup**: Page layout using semantic HTML
-- **Styling**: Scoped CSS variables with dark theme (blue/slate palette)
-- **Logic**: Vanilla JavaScript with modular function organization
+| Variable | Purpose |
+| --- | --- |
+| `devices` | User-editable list of named devices with IP address and zone |
+| `firewallModel` | Parsed zones, forwardings, and traffic rules |
+| `cy` | Current Cytoscape graph instance |
+| `currentLayout` | Selected graph layout name |
 
-### Data Model
+## Data Model
+
+The runtime model is plain JavaScript rather than TypeScript, but it follows this shape:
 
 ```typescript
-// Firewall Configuration Model
 interface FirewallModel {
-  zones: {
-    [zoneName: string]: {
-      name: string;
-      input: "ACCEPT" | "REJECT" | ...;   // Inbound traffic policy
-      output: "ACCEPT" | "REJECT" | ...;  // Outbound traffic policy
-      forward: "ACCEPT" | "REJECT" | ...; // Transit traffic policy
-      networks: string[];                  // Associated network interfaces
-    }
-  };
-  forwardings: {
-    src: string;  // Source zone
-    dest: string; // Destination zone
-  }[];
-  rules: {
-    name: string;
-    src: string;       // Source zone (optional)
-    dest: string;      // Destination zone (optional)
-    srcIp: string;     // Source IP address (optional)
-    destIp: string;    // Destination IP address (optional)
-    proto: string;     // Protocol (tcp, udp, etc.)
-    destPort: string;  // Destination port
-    target: "ACCEPT" | "REJECT" | ...; // Action
-  }[];
+	zones: {
+		[zoneName: string]: {
+			name: string;
+			input: string;
+			output: string;
+			forward: string;
+			networks: string[];
+		};
+	};
+	forwardings: {
+		src: string;
+		dest: string;
+	}[];
+	rules: {
+		name: string;
+		src: string;
+		dest: string;
+		srcIp: string;
+		destIp: string;
+		proto: string;
+		destPort: string;
+		target: string;
+	}[];
 }
 
-// Device Mapping
 interface Device {
-  name: string;      // Display name (e.g., "Alexa Kitchen")
-  ip: string;        // IP address (e.g., "172.16.20.10")
-  zone: string;      // Assigned zone (e.g., "iot")
+	name: string;
+	ip: string;
+	zone: string;
+}
+
+interface Decision {
+	allowed: boolean;
+	reason: string;
 }
 ```
 
-## Core Components & Functions
+## Phase A: Configuration And Device Input
 
-### 1. Input & Parsing Layer
+Phase A gathers the two inputs needed for analysis:
 
-**Functions**: `parseOpenWrtFirewall()`, `loadConfigFile()`, `loadExample()`
+- OpenWrt firewall configuration text, usually from `/etc/config/firewall`.
+- Manual device mappings that assign a device name and IP address to a firewall zone.
 
-Parses OpenWRT UCL-style configuration text into the `FirewallModel`:
-- Extracts `config zone` sections (zones define network security policies)
-- Extracts `config forwarding` sections (zone-to-zone traffic permissions)
-- Extracts `config rule` sections (specific IP/port-based rules)
-- Handles comments and multiline values
+Relevant functions:
 
-**Key Parsing Logic**:
-1. Split input by newlines
-2. Match config section headers: `config <type> '<name>'`
-3. Collect nested options: `option <key> '<value>'`
-4. Collect list items: `list <key> '<value>'`
-5. Build typed objects with consistent structure
+| Function | Role |
+| --- | --- |
+| `main()` | Loads the example config and renders the initial view |
+| `loadExample()` | Restores the built-in example config and default devices |
+| `loadConfigFile(event)` | Uses `FileReader` to load a local config file into the textarea |
+| `addDevice()` | Adds a blank editable device row |
+| `updateDevice(index, key, value)` | Updates one device field and re-renders |
+| `removeDevice(index)` | Deletes one device mapping |
+| `resetDevices()` | Restores the default device list |
+| `renderDeviceInputs()` | Renders editable device rows |
 
-### 2. Decision Logic Layer
+Device mappings are not inferred from the firewall config. OpenWrt firewall zones refer to logical networks, not individual client devices, so the user has to supply device-to-zone context manually.
 
-**Functions**: `evaluateZonePath()`, `evaluateDevicePath()`, `findMatchingSpecificRule()`
+## Phase B: OpenWrt UCI Parsing
 
-Determines if traffic between zones/devices is allowed:
+Phase B turns OpenWrt UCI-style firewall text into a simple JavaScript model.
 
-#### Zone-to-Zone Decision (`evaluateZonePath`)
-```
-If same zone:
-  → Use zone.forward policy
+Relevant function:
 
-If different zones:
-  → Check if forwarding rule exists (src→dest)
-  → If yes → ALLOW
-  → If no → DENY
-```
+| Function | Role |
+| --- | --- |
+| `parseOpenWrtFirewall(text)` | Parses `config`, `option`, and `list` lines into zones, forwardings, and rules |
 
-#### Device-to-Device Decision (`evaluateDevicePath`)
-```
-1. Find specific rule matching (src IP, dst IP, zones)
-   → If found → Use rule.target
-2. Fallback to zone-to-zone decision
-   → Use evaluateZonePath(srcDevice.zone, dstDevice.zone)
-```
+Supported input patterns:
 
-Returns a decision object with:
-```typescript
-{
-  allowed: boolean;
-  reason: string;  // Human-readable explanation
-}
-```
+```text
+config zone
+    option name 'lan'
+    option input 'ACCEPT'
+    option output 'ACCEPT'
+    option forward 'ACCEPT'
+    list network 'lan'
 
-### 3. Visualization Layer
+config forwarding
+    option src 'lan'
+    option dest 'wan'
 
-#### A. Summary View (`renderSummary`)
-Displays metrics in a card grid:
-- Number of firewall zones
-- Zone forwarding rules count
-- Traffic rules count
-- Mapped devices count
-
-#### B. Zone View (`renderZoneView`)
-Grid of zone cards showing:
-- Zone name and associated networks
-- Zone policies (input/output/forward)
-- Devices mapped to each zone
-- Visual indicator for IoT zones (highlight with warning style)
-
-#### C. Connectivity Matrix (`renderMatrix`)
-Table showing zone-to-zone connectivity:
-- Rows/columns represent zones
-- Cell content: "ALLOW" or "DENY"
-- Color-coded (green/red)
-- Evaluated using `evaluateZonePath()`
-
-#### D. Device Relationship Map (`renderRelationshipMap`)
-Grid of relationship cards showing all device pairs:
-- Source device (name, zone, IP)
-- Destination device (name, zone, IP)
-- Decision (ALLOWED/BLOCKED)
-- Reason (rule matched or zone decision)
-- Visual indicator (border color: green/red)
-
-#### E. Device Path Testing (`testDevicePath`)
-Interactive tool to test specific device-to-device connectivity:
-- Dropdown selectors for source/destination devices
-- Evaluation using `evaluateDevicePath()`
-- Highlights matching path in graph
-
-#### F. Graph Visualization (`renderGraph`)
-
-Uses **Cytoscape.js** (v3.30.4) to visualize network relationships.
-
-**Graph Elements**:
-- **Nodes**: Zones (blue rectangles) and Devices (purple ellipses)
-- **Edges**: Relationships between nodes (colored by decision)
-
-**Edge Types**:
-- Green solid line: ALLOW (device/zone to zone)
-- Red dashed line: DENY (blocked paths)
-- Gray dotted line: Membership (device belongs to zone)
-
-**Graph Styling**:
-```javascript
-- Zone nodes: 95×55px, blue, rounded rectangle
-- Device nodes: 72×72px, purple, ellipse
-- Edges: Bezier curves with triangle arrowheads
-- Labels: Zone name, device name + IP
+config rule
+    option name 'Allow-example'
+    option src 'iot'
+    option dest 'iot'
+    option src_ip '172.16.20.10'
+    option dest_ip '172.16.20.11'
+    option target 'ACCEPT'
 ```
 
-**Layout Options**:
-1. **COSE** (Compound Spring Embedder): Physics-based layout
-   - Good for discovering relationship clusters
-   - Parameters: `nodeRepulsion: 9000`, `idealEdgeLength: 120`
+Parser behaviour:
 
-2. **Circle**: Radial layout from center
+- Blank lines and whole-line comments are ignored.
+- `config <type> '<name>'` starts a new section.
+- `option <key> '<value>'` becomes a scalar property.
+- `list <key> '<value>'` becomes an array property.
+- Zone policy defaults are `REJECT` when not present.
 
-3. **Breadthfirst**: Layered hierarchical layout
-   - Good for directed acyclic graphs
+Known parser limits:
 
-**Interactivity**:
-- Tap node → Highlight connected relationships (fade other elements)
-- Tap empty space → Clear highlights
-- Wheel scroll → Zoom
+- Inline comments are not stripped.
+- Include files and generated firewall fragments are not followed.
+- Complex quoting and escaped characters are not fully interpreted.
+- Only `zone`, `forwarding`, and `rule` sections are represented in the model.
 
-### 4. Device Management Layer
+## Phase C: Connectivity Evaluation
 
-**Functions**: `addDevice()`, `removeDevice()`, `updateDevice()`, `resetDevices()`, `renderDeviceInputs()`
+Phase C answers the core question: "would this source be allowed to reach this destination?"
 
-Manages the device-to-zone mapping list:
-- Stores devices in `devices[]` array
-- Default devices provided for example
-- CRUD operations with real-time re-evaluation
-- Persistent during session
+Relevant functions:
 
-### 5. Utility & Helper Functions
+| Function | Role |
+| --- | --- |
+| `evaluateZonePath(srcZone, dstZone)` | Evaluates zone-to-zone reachability |
+| `evaluateDevicePath(srcDevice, dstDevice)` | Evaluates device-to-device reachability |
+| `findMatchingSpecificRule(srcDevice, dstDevice)` | Finds the first matching rule by zone and IP fields |
+| `normaliseTarget(value)` | Compares rule and policy targets case-insensitively |
+
+### Zone Decisions
+
+For same-zone traffic:
+
+```text
+if srcZone == dstZone:
+    use that zone's forward policy
+```
+
+For cross-zone traffic:
+
+```text
+if forwarding exists from srcZone to dstZone:
+    ALLOW
+else:
+    DENY
+```
+
+This deliberately simplifies OpenWrt behaviour. The app does not currently evaluate zone `input` or `output` policies for cross-zone decisions, and it treats a forwarding section as sufficient to mark a path as allowed.
+
+### Device Decisions
+
+Device checks run in two steps:
+
+```text
+1. Find the first rule where src/dest zone and src/dest IP match.
+   If found, ACCEPT means allowed; every other target is treated as blocked.
+
+2. If no specific rule matches, fall back to evaluateZonePath().
+```
+
+The parser stores `proto` and `dest_port`, but the current decision engine does not use protocol or port matching. That should be addressed before presenting the app as an accurate per-service firewall analyser.
+
+## Phase D: View Rendering
+
+Phase D renders the parsed model and evaluation results into the page.
+
+Relevant functions:
+
+| Function | View |
+| --- | --- |
+| `renderSummary()` | Count cards for zones, forwardings, rules, and mapped devices |
+| `renderZoneView()` | Zone cards with policies, networks, and mapped devices |
+| `renderMatrix()` | Zone connectivity table using `evaluateZonePath()` |
+| `renderDeviceSelectors()` | Source and destination dropdowns for path testing |
+| `testDevicePath()` | Interactive single path test using `evaluateDevicePath()` |
+| `renderRelationshipMap()` | All directed device-to-device relationship cards |
+
+Rendering uses `escapeHtml()` before injecting user-controlled values into HTML strings. That is important because firewall files and device names are user input.
+
+## Phase E: Graph Construction And Interaction
+
+Phase E converts zones, devices, and decisions into Cytoscape elements.
+
+Relevant functions:
+
+| Function | Role |
+| --- | --- |
+| `renderGraph(layoutName = null)` | Creates or replaces the Cytoscape instance |
+| `buildGraphElements()` | Builds all visible nodes and edges based on the current filter |
+| `buildZoneRelationshipEdges()` | Builds directed zone decision edges |
+| `buildDeviceRelationshipEdges()` | Builds directed device decision edges |
+| `buildDeviceRelationships()` | Builds all directed device pairs except self-pairs |
+| `filterEdge(edge, filter)` | Applies the selected graph filter |
+| `getGraphLayout(layoutName)` | Returns Cytoscape layout settings |
+| `fitGraph()` | Fits the current graph into the viewport |
+| `highlightNodeRelationships(node)` | Highlights a tapped node and its connected elements |
+| `highlightTestedPath(srcIndex, dstIndex)` | Highlights the tested source-to-destination path |
+
+Graph node types:
+
+| Type | Shape | Meaning |
+| --- | --- | --- |
+| Zone | Rounded rectangle | Firewall zone from the parsed config |
+| Device | Ellipse | User-supplied device mapping |
+
+Graph edge types:
+
+| Type | Style | Meaning |
+| --- | --- | --- |
+| Membership | Grey dotted edge | Device belongs to a zone |
+| Allowed relationship | Green solid edge | Evaluated path is allowed |
+| Blocked relationship | Red dashed edge | Evaluated path is blocked |
+
+Available layouts:
+
+| Layout | Use |
+| --- | --- |
+| `cose` | Force-directed layout for exploring clusters |
+| `circle` | Radial layout for compact overviews |
+| `breadthfirst` | Layered directed layout |
+
+Available filters:
+
+- Show all relationships.
+- Allowed only.
+- Blocked only.
+- Zone relationships only.
+- Device relationships only.
+
+## Phase F: Utilities And Defensive Helpers
+
+Phase F provides small helpers shared by the earlier phases.
 
 | Function | Purpose |
-|----------|---------|
-| `escapeHtml()` | HTML escape user input (XSS prevention) |
-| `safeId()` | Normalize strings to valid DOM IDs |
-| `normaliseTarget()` | Standardize policy values to uppercase |
-| `zoneNodeId()`, `deviceNodeId()` | Generate consistent graph node IDs |
-| `filterEdge()` | Filter graph edges by type/decision |
-| `getGraphLayout()` | Configure Cytoscape layout parameters |
+| --- | --- |
+| `escapeHtml(value)` | Escapes user-controlled values before HTML insertion |
+| `safeId(value)` | Produces stable IDs for graph nodes |
+| `zoneNodeId(zoneName)` | Builds a graph ID for a zone |
+| `deviceNodeId(index)` | Builds a graph ID for a device |
 
 ## Data Flow
 
+```text
+Phase A: User input
+    firewall text
+    device mappings
+
+        |
+        v
+
+Phase B: Parse config
+    parseOpenWrtFirewall()
+    firewallModel
+
+        |
+        v
+
+Phase C: Evaluate paths
+    evaluateZonePath()
+    evaluateDevicePath()
+
+        |
+        v
+
+Phase D: Render standard views
+    summary
+    zone cards
+    matrix
+    relationship cards
+
+        |
+        v
+
+Phase E: Render graph
+    Cytoscape graph
 ```
-┌─────────────────────┐
-│ User Input          │
-│ • Firewall config   │
-│ • Device mapping    │
-│ • Query parameters  │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Parse & Process     │
-│ parseOpenWrtFirewall│
-│ buildDeviceRelation-│
-│ships()             │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Decision Engine     │
-│ evaluateZonePath()  │
-│ evaluateDevicePath()│
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Render Views        │
-│ • Summary           │
-│ • Matrix            │
-│ • Graph             │
-│ • Relationships     │
-└─────────────────────┘
-```
 
-## Key Features
+## Example Model
 
-### 1. **Firewall Config Parsing**
-- Supports standard OpenWRT UCL format
-- Extracts zones, forwardings, and rules
-- Handles optional fields gracefully
+The built-in example defines:
 
-### 2. **Device-to-Zone Mapping**
-- Map real devices (by IP) to firewall zones
-- Identify which devices can/cannot communicate
-- Useful for IoT security analysis
+| Category | Contents |
+| --- | --- |
+| Zones | `lan`, `iot`, `guest`, `wan` |
+| Forwardings | `lan -> wan`, `iot -> wan`, `guest -> wan` |
+| Specific rules | Allow one Alexa-to-Alexa path, then reject broader IoT east-west traffic |
+| Default devices | Admin laptop, two Alexa devices, IoT camera, guest phone |
 
-### 3. **Multi-View Visualization**
-- Summary metrics
-- Zone cards with device listings
-- Connectivity matrix (zone-to-zone)
-- Relationship cards (all device pairs)
-- Interactive graph diagram
-
-### 4. **Rule Evaluation**
-- Specific IP rules override zone policies
-- Zone forwardings control inter-zone traffic
-- Zone policies control intra-zone traffic
-- Clear reasoning for every decision
-
-### 5. **Interactive Graph**
-- Multiple layout algorithms
-- Filtering (all/allowed/blocked/zones-only/devices-only)
-- Node highlighting
-- Zoom/pan controls
-
-### 6. **Path Testing**
-- Test connectivity between specific devices
-- View matching rules/reasons
-- Highlight path in graph
-
-## Example Firewall Model
-
-The application includes a built-in example:
-
-```
-Zones:      lan, iot, guest, wan
-Policies:   
-  - lan:   ACCEPT input/output, ACCEPT forward (open)
-  - iot:   REJECT input, ACCEPT output, REJECT forward (isolated)
-  - guest: REJECT input/forward, ACCEPT output (guest network)
-  - wan:   REJECT input/forward, ACCEPT output (external)
-
-Forwardings:
-  - lan → wan
-  - iot → wan
-  - guest → wan
-
-Rules:
-  - Allow specific Alexa devices to communicate within iot zone
-  - Block generic east-west traffic in iot zone
-```
+The example is useful for demonstrating the relationship views, but it should not be treated as a recommended firewall policy.
 
 ## Security Considerations
 
-1. **Client-Side Only**: No data sent to server—firewall config stays local
-2. **HTML Escaping**: All user inputs escaped before rendering to prevent XSS
-3. **No External Dependencies**: Only Cytoscape.js from CDN (graph visualization)
-4. **Static File**: Can be served over HTTPS with no authentication needed
+- Firewall text and device mappings stay in the browser.
+- Local file loading uses the browser `FileReader` API.
+- User-controlled strings are escaped before being inserted into rendered HTML.
+- The app is static and can be hosted on any static web server.
+- Cytoscape is loaded from a third-party CDN, so offline use or stricter supply-chain control would require vendoring that script locally.
 
-## Limitations & Design Tradeoffs
+## Limitations And Tradeoffs
 
-| Limitation | Reason |
-|-----------|--------|
-| Single file | Simpler deployment, no build system |
-| Vanilla JS | No dependencies, easier to audit |
-| In-memory parsing | Suitable for typical firewall configs (~100 KB) |
-| No export/save | Focus on exploration; users can screenshot |
-| Limited rule matching | Only basic IP/zone/port matching (real UFW is more complex) |
+| Limitation | Impact |
+| --- | --- |
+| Single HTML file | Easy to deploy, but harder to test and maintain as the app grows |
+| Manual device mapping | Accurate device context depends on user input |
+| Simplified parser | Good for common UCI files, not a complete UCI interpreter |
+| Simplified decision engine | Useful for visual exploration, not a full firewall simulation |
+| Protocol and port fields are not evaluated | Per-service conclusions may be inaccurate |
+| No persistence | Device mappings and edited config are lost on page reload |
+| CDN dependency | Graph rendering depends on external script availability |
+| No automated tests | Behaviour is currently verified manually |
 
-## Planned Features & Roadmap
+## Roadmap
 
-### Immediate Priorities
+### Phase A: Persistence
 
-#### 1. **Local Browser Storage (localStorage)**
-- **Purpose**: Persist user state across sessions
-- **What to Store**:
-  - Firewall config text (device mapping is already derivable from firewall + devices)
-  - Device list (name, IP, zone mappings)
-  - User preferences (graph layout choice, filter preferences)
-  - Last-used firewall config
-- **Implementation**: 
-  - Add `saveToLocalStorage()` function
-  - Add `loadFromLocalStorage()` function
-  - Auto-save on every parse/device change
-  - Restore on page load
+Add browser persistence with `localStorage`.
 
-#### 2. **Auto-Detection Mode**
-Remove the need for explicit button clicks by implementing reactive evaluation:
+Store:
 
-**A. Auto-Parse Firewall Config**
-- Monitor textarea for changes (on `input` event)
-- Debounce parsing (500ms) to avoid excessive calculations
-- Replace explicit "Parse Firewall" button with optional "Parse Now" (for large configs)
-- Auto-save to localStorage
+- Firewall config text.
+- Device list.
+- Selected graph layout.
+- Selected graph filter.
+- Last tested source and destination device.
 
-**B. Auto-Test Device Path**
-- Auto-evaluate when device selectors change
-- Remove need for explicit "Test Path" button
-- Immediately update results and graph highlighting
+Implementation notes:
 
-**C. Global Change Detection**
-- Single `onchange` handler that re-renders all views
-- Batch rendering updates for performance
-- Track dirty state to avoid unnecessary re-renders
+- Add `saveToLocalStorage()`.
+- Add `loadFromLocalStorage()`.
+- Save after parsing and after device changes.
+- Load before the initial render in `main()`.
 
-**Implementation Pattern**:
+### Phase B: Reactive Updates
+
+Reduce explicit button clicks by making the page respond to input changes.
+
+Implementation notes:
+
+- Add a debounced `input` handler for the firewall textarea.
+- Keep the manual "Parse Firewall" button as an explicit recovery path for large configs.
+- Re-test the selected device path when either selector changes.
+- Batch expensive graph renders behind the debounce.
+
+Example pattern:
+
 ```javascript
-// Debounced auto-parse
+function debounce(fn, delay) {
+	let timeoutId = null;
+
+	return function debounced(...args) {
+		window.clearTimeout(timeoutId);
+		timeoutId = window.setTimeout(() => fn.apply(this, args), delay);
+	};
+}
+
 const autoParse = debounce(() => {
-    parseAndRender();
-    saveToLocalStorage();
+	parseAndRender();
+	saveToLocalStorage();
 }, 500);
-
-// Attach to textarea
-textarea.addEventListener('input', autoParse);
-textarea.addEventListener('change', autoParse);
-
-// Function: debounce(func, delay)
-// Returns function that waits `delay`ms after last call before executing
 ```
 
-#### 3. **Footer with Repository Info & Year**
-Add a persistent footer showing:
-- Link to GitHub repository
-- Current year (auto-updated via provided function)
-- Optional: Version/build date
+### Phase C: Project Metadata
 
-**HTML Structure**:
-```html
-<footer>
-    <a href="https://github.com/[owner]/openwrt-firewall-visualiser" target="_blank">
-        GitHub Repository
-    </a>
-    <span> | © <span id="currentYear">2025</span></span>
-</footer>
-```
+Add a small footer with repository and version metadata.
 
-**CSS Styling**:
-```css
-footer {
-    background: var(--bg-dark);
-    border-top: 1px solid var(--border);
-    padding: 1rem 1.5rem;
-    text-align: center;
-    color: var(--muted);
-    font-size: 0.9rem;
-    margin-top: 2rem;
-}
+Include:
 
-footer a {
-    color: var(--info);
-    text-decoration: none;
-}
+- GitHub repository link.
+- Current year from `new Date().getFullYear()`.
+- Optional static version or build date.
 
-footer a:hover {
-    text-decoration: underline;
-}
-```
+Implementation notes:
 
-**JavaScript**:
-```javascript
-const CURRENT_YEAR_ID = "currentYear";
+- Add footer markup before `</body>`.
+- Add footer styling to the inline stylesheet.
+- Add `setCurrentYear()` and call it from `main()`.
+- Use the real repository URL rather than a placeholder.
 
-function setCurrentYear() {
-    const yearElement = document.getElementById(CURRENT_YEAR_ID);
-    
-    if (!yearElement) {
-        return;
-    }
-    
-    yearElement.textContent = String(new Date().getFullYear());
-}
+### Phase D: Rule Engine Accuracy
 
-// Call on page load
-document.addEventListener('DOMContentLoaded', setCurrentYear);
-// Or in main()
-function main() {
-    document.getElementById("firewallInput").value = EXAMPLE_FIREWALL;
-    setCurrentYear();  // Add this
-    renderDeviceInputs();
-    parseAndRender();
-}
-```
+Improve decision accuracy before adding more visualisations.
 
-**Implementation Checklist**:
-- [ ] Add footer HTML before closing `</body>`
-- [ ] Add footer CSS to `<style>` block
-- [ ] Add `setCurrentYear()` function
-- [ ] Call `setCurrentYear()` in `main()`
-- [ ] Update GitHub URL in href
+Candidate improvements:
 
----
+- Honour protocol matching.
+- Honour destination port matching.
+- Represent rule order more explicitly in explanations.
+- Distinguish `ACCEPT`, `REJECT`, and `DROP`.
+- Surface unsupported rule fields in the UI.
+- Consider zone `input` and `output` policies where relevant.
 
-### Future Enhancement Points
+### Phase E: Import, Export, And Comparison
 
-1. **Advanced Rule Matching**
-   - Protocol-specific decisions
-   - Port range validation
-   - Stateful rule combinations
+Add workflows for longer-lived analysis.
 
-2. **Performance**
-   - Rule indexing for large configs
-   - Lazy graph rendering
-   - Optimize device relationship computation for 100+ devices
+Candidate improvements:
 
-3. **Additional Visualizations**
-   - Traffic heat maps
-   - Rule conflict detection
-   - Policy recommendations
-   - Timeline view of rule evaluations
-
-4. **Import/Export**
-   - Export visualizations as images/SVG
-   - Export device mappings as JSON/CSV
-   - Save/load session snapshots
-
-5. **Multi-Config Comparison**
-   - Diff two firewall configurations
-   - Before/after change visualization
-   - Change impact analysis
-
-6. **Advanced Device Features**
-   - Device groups (query multiple devices at once)
-   - Protocol/port filtering
-   - Geo-location awareness
-   - Device asset tagging
+- Export device mappings as JSON or CSV.
+- Import saved device mappings.
+- Export graph images.
+- Compare two firewall configs.
+- Show before/after impact for changed forwardings and rules.
 
 ## Development Notes
 
-### No Build System
-The application is intentionally a single HTML file with:
-- Inline CSS (no separate stylesheet)
-- Inline JavaScript (no modules)
-- No npm/package manager required
-- Deployable to any static host
+The current implementation is intentionally simple:
 
-### Extending the Code
-Functions are organized by concern:
-1. **Parsing**: `parseOpenWrtFirewall` and related
-2. **Decision**: `evaluate*Path` functions
-3. **Rendering**: `render*` functions
-4. **Graph**: `buildGraphElements`, `renderGraph`
-5. **Utilities**: Helper functions at end
+- Inline CSS.
+- Inline JavaScript.
+- No modules.
+- No build tooling.
+- No npm dependencies.
 
-To add features:
-1. Extend `FirewallModel` interface
-2. Add parsing logic in `parseOpenWrtFirewall`
-3. Add decision logic in evaluation functions
-4. Add rendering with new `render*` functions
-5. Update graph elements in `buildGraphElements`
+When adding a feature, follow the phase order:
 
-### Testing the Application
-1. Paste OpenWRT firewall config in textarea
-2. Click "Parse Firewall"
-3. Add/edit devices in device mapping section
-4. Observe visualization updates in real-time
-5. Use graph filtering and testing tools
+1. Phase A: Decide whether new user input or state is needed.
+2. Phase B: Extend parsing only if the firewall model needs new data.
+3. Phase C: Update evaluation logic and explanations.
+4. Phase D: Render the new result in the non-graph views.
+5. Phase E: Add graph nodes, edges, labels, or filters if useful.
+6. Phase F: Add or update helper functions only when shared behaviour emerges.
 
----
+## Manual Verification
 
-*Last Updated: 2025 | Single-file SPA for OpenWRT firewall visualization*
+Use this workflow after changes:
+
+1. Open `public/index.html` in a browser.
+2. Confirm the built-in example renders automatically.
+3. Click "Parse Firewall" and check the summary, matrix, zone cards, relationship cards, and graph.
+4. Add, edit, and remove a device mapping.
+5. Test a specific source-to-destination path.
+6. Try each graph layout and filter.
+7. Upload a local firewall config and verify that no data leaves the browser except the Cytoscape CDN request.
+
+## Last Updated
+
+2026-06-09

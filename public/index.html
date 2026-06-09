@@ -296,6 +296,69 @@
 			margin: 0.4rem 0;
 		}
 
+		.tool-section {
+			margin-top: 1rem;
+			padding-top: 1rem;
+			border-top: 1px solid var(--border);
+		}
+
+		.tool-section h3 {
+			font-size: 1rem;
+		}
+
+		.compact-textarea {
+			min-height: 120px;
+			margin-top: 0.5rem;
+		}
+
+		.import-result {
+			min-height: 2.5rem;
+		}
+
+		.relationship {
+			cursor: pointer;
+		}
+
+		.relationship:hover {
+			border-color: var(--info);
+		}
+
+		.findings {
+			display: grid;
+			gap: 0.75rem;
+			margin-top: 0.75rem;
+		}
+
+		.finding {
+			background: var(--bg-dark);
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			padding: 0.75rem;
+		}
+
+		.finding.high {
+			border-color: rgba(239, 68, 68, 0.75);
+		}
+
+		.finding.medium {
+			border-color: rgba(245, 158, 11, 0.75);
+		}
+
+		.finding.low {
+			border-color: rgba(56, 189, 248, 0.75);
+		}
+
+		.export-output {
+			min-height: 150px;
+		}
+
+		.compare-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+			gap: 0.75rem;
+			margin-top: 0.75rem;
+		}
+
 		.graph-panel {
 			margin-top: 1.5rem;
 		}
@@ -434,6 +497,39 @@
 			</div>
 
 			<div id="deviceInputs"></div>
+
+			<section class="tool-section">
+				<h3>Subnet Mappings</h3>
+				<textarea id="subnetMappings" class="compact-textarea" spellcheck="false" onchange="handleSubnetMappingsChange()"></textarea>
+			</section>
+
+			<section class="tool-section">
+				<h3>Bulk Import Hosts</h3>
+				<select id="bulkImportFormat">
+					<option value="auto">Auto detect</option>
+					<option value="host-list">Host list</option>
+					<option value="neighbour">Neighbour / ARP table</option>
+					<option value="dhcp">OpenWrt DHCP leases</option>
+				</select>
+				<textarea id="bulkHostsInput" class="compact-textarea" spellcheck="false" placeholder="(Hosts) cat /etc/hosts &#10;(ARP) ip neighbour &#10;(DHCP leases) cat /tmp/dhcp.leases"></textarea>
+				<div class="controls">
+					<button onclick="importBulkHosts()">Import Hosts</button>
+					<button onclick="clearBulkImport()">Clear Import</button>
+				</div>
+				<div id="bulkImportResult" class="result small import-result">No hosts imported yet.</div>
+			</section>
+
+			<section class="tool-section">
+				<h3>Session Tools</h3>
+				<div class="controls">
+					<button onclick="exportDevicesJson()">Export Devices JSON</button>
+					<button onclick="exportDevicesCsv()">Export Devices CSV</button>
+					<button onclick="exportSessionJson()">Export Session JSON</button>
+					<button onclick="exportGraphPng()">Export Graph PNG</button>
+				</div>
+				<input type="file" accept=".json,.csv,.txt" onchange="importDataFile(event)" />
+				<textarea id="exportOutput" class="compact-textarea export-output" spellcheck="false" readonly></textarea>
+			</section>
 		</section>
 
 		<section class="panel">
@@ -494,12 +590,30 @@
 				<select id="srcDevice"></select>
 				<span>➡️</span>
 				<select id="dstDevice"></select>
+				<select id="pathProtocol">
+					<option value="">Any protocol</option>
+					<option value="tcp">TCP</option>
+					<option value="udp">UDP</option>
+					<option value="icmp">ICMP</option>
+				</select>
+				<input id="pathDestPort" placeholder="Port" />
 				<button onclick="testDevicePath()">Test Path</button>
 			</div>
 			<div id="testResult" class="result small">Select two devices and test whether traffic is allowed.</div>
 
+			<h2 style="margin-top: 1.5rem;">⚠️ Relationship Analysis</h2>
+			<div id="analysisView" class="findings"></div>
+
 			<h2 style="margin-top: 1.5rem;">🔎 Device Relationship Map</h2>
 			<div id="relationshipView" class="relationships"></div>
+
+			<h2 style="margin-top: 1.5rem;">🧾 Firewall Comparison</h2>
+			<textarea id="compareFirewallInput" class="compact-textarea" spellcheck="false"></textarea>
+			<div class="controls">
+				<button onclick="compareFirewallConfig()">Compare Config</button>
+				<button onclick="clearComparison()">Clear Comparison</button>
+			</div>
+			<div id="comparisonView" class="compare-grid"></div>
 		</section>
 	</main>
 
@@ -573,16 +687,28 @@ config rule
 			{ name: "Guest Phone", ip: "172.16.30.25", zone: "guest" }
 		];
 
+		const DEFAULT_SUBNET_MAPPINGS = `172.16.10.0/24 lan
+172.16.20.0/24 iot
+172.16.30.0/24 guest`;
+
 		const STORAGE_KEY = "openwrt-firewall-visualiser-state";
+		const STORAGE_TTL_DAYS = 45;
+		const STORAGE_TTL_MS = STORAGE_TTL_DAYS * 24 * 60 * 60 * 1000;
 		const CURRENT_YEAR_ID = "currentYear";
 		const DEFAULT_TEST_PATH = {
 			srcIndex: "0",
 			dstIndex: "1"
 		};
+		const DEFAULT_PATH_CRITERIA = {
+			protocol: "",
+			destPort: ""
+		};
 		const VALID_GRAPH_LAYOUTS = ["cose", "circle", "breadthfirst"];
 		const VALID_GRAPH_FILTERS = ["all", "allowed", "blocked", "zones", "devices"];
+		const SUPPORTED_RULE_FIELDS = ["name", "src", "dest", "src_ip", "dest_ip", "proto", "dest_port", "target", "family", "enabled"];
 
 		let devices = structuredClone(DEFAULT_DEVICES);
+		let subnetMappingsText = DEFAULT_SUBNET_MAPPINGS;
 
 		let firewallModel = {
 			zones: {},
@@ -593,6 +719,8 @@ config rule
 		let cy = null;
 		let currentLayout = "cose";
 		let selectedTestPath = structuredClone(DEFAULT_TEST_PATH);
+		let selectedPathCriteria = structuredClone(DEFAULT_PATH_CRITERIA);
+		let graphPathHighlightRequested = false;
 		let storageAvailable = true;
 
 		const autoParse = debounce(() => {
@@ -601,9 +729,11 @@ config rule
 
 		function main() {
 			setCurrentYear();
-			loadFromLocalStorage();
+			loadState();
 			bindReactiveControls();
 			renderDeviceInputs();
+			renderSubnetMappings();
+			renderPathCriteria();
 			parseAndRender({ persist: false });
 		}
 
@@ -614,8 +744,13 @@ config rule
 		function loadExample() {
 			document.getElementById("firewallInput").value = EXAMPLE_FIREWALL;
 			devices = structuredClone(DEFAULT_DEVICES);
+			subnetMappingsText = DEFAULT_SUBNET_MAPPINGS;
 			selectedTestPath = structuredClone(DEFAULT_TEST_PATH);
+			selectedPathCriteria = structuredClone(DEFAULT_PATH_CRITERIA);
+			graphPathHighlightRequested = false;
 			renderDeviceInputs();
+			renderSubnetMappings();
+			renderPathCriteria();
 			parseAndRender();
 		}
 
@@ -650,6 +785,7 @@ config rule
 		function resetDevices() {
 			devices = structuredClone(DEFAULT_DEVICES);
 			selectedTestPath = structuredClone(DEFAULT_TEST_PATH);
+			graphPathHighlightRequested = false;
 			renderDeviceInputs();
 			parseAndRender();
 		}
@@ -673,6 +809,35 @@ config rule
 			});
 
 			renderDeviceSelectors();
+		}
+
+		function renderSubnetMappings() {
+			const textarea = document.getElementById("subnetMappings");
+
+			if (!textarea) {
+				return;
+			}
+
+			textarea.value = subnetMappingsText;
+		}
+
+		function renderPathCriteria() {
+			const protocolSelect = document.getElementById("pathProtocol");
+			const portInput = document.getElementById("pathDestPort");
+
+			if (protocolSelect) {
+				protocolSelect.value = selectedPathCriteria.protocol;
+			}
+
+			if (portInput) {
+				portInput.value = selectedPathCriteria.destPort;
+			}
+		}
+
+		function handleSubnetMappingsChange() {
+			const textarea = document.getElementById("subnetMappings");
+			subnetMappingsText = textarea ? textarea.value : DEFAULT_SUBNET_MAPPINGS;
+			parseAndRender();
 		}
 
 		function updateDevice(index, key, value) {
@@ -701,10 +866,11 @@ config rule
 			renderMatrix();
 			renderDeviceSelectors();
 			renderRelationshipMap();
-			renderCurrentTestResult(false);
+			renderAnalysisFindings();
+			renderCurrentTestResult(false, { highlight: false });
 
 			if (shouldPersist) {
-				saveToLocalStorage();
+				saveState();
 			}
 		}
 
@@ -712,6 +878,8 @@ config rule
 			const firewallInput = document.getElementById("firewallInput");
 			const srcSelect = document.getElementById("srcDevice");
 			const dstSelect = document.getElementById("dstDevice");
+			const pathProtocol = document.getElementById("pathProtocol");
+			const pathDestPort = document.getElementById("pathDestPort");
 
 			if (firewallInput) {
 				firewallInput.addEventListener("input", autoParse);
@@ -726,15 +894,31 @@ config rule
 				dstSelect.addEventListener("change", handleTestSelectorChange);
 			}
 
-			window.addEventListener("beforeunload", saveToLocalStorage);
+			if (pathProtocol) {
+				pathProtocol.addEventListener("change", handlePathCriteriaChange);
+			}
+
+			if (pathDestPort) {
+				pathDestPort.addEventListener("input", handlePathCriteriaChange);
+			}
+
+			window.addEventListener("beforeunload", saveState);
 		}
 
 		function handleTestSelectorChange() {
 			updateSelectedTestPathFromSelectors();
-			renderCurrentTestResult();
+			graphPathHighlightRequested = false;
+			renderCurrentTestResult(true, { highlight: false });
 		}
 
-		function loadFromLocalStorage() {
+		function handlePathCriteriaChange() {
+			updatePathCriteriaFromInputs();
+			graphPathHighlightRequested = false;
+			parseAndRender();
+		}
+
+		function loadState() {
+			clearExpiredState();
 			const savedState = readStoredState();
 			const firewallInput = document.getElementById("firewallInput");
 			const graphFilter = document.getElementById("graphFilter");
@@ -743,33 +927,66 @@ config rule
 				? savedState.configText
 				: EXAMPLE_FIREWALL;
 			devices = normaliseSavedDevices(savedState.devices);
+			subnetMappingsText = typeof savedState.subnetMappingsText === "string"
+				? savedState.subnetMappingsText
+				: DEFAULT_SUBNET_MAPPINGS;
 			currentLayout = normaliseGraphLayout(savedState.graphLayout);
 			selectedTestPath = normaliseSavedTestPath(savedState.testPath);
+			selectedPathCriteria = normalisePathCriteria(savedState.pathCriteria);
+			graphPathHighlightRequested = false;
 
 			if (graphFilter) {
 				graphFilter.value = normaliseGraphFilter(savedState.graphFilter);
 			}
 		}
 
-		function saveToLocalStorage() {
+		function saveState() {
 			if (!storageAvailable) {
 				return;
 			}
 
 			try {
-				const payload = {
-					version: 1,
-					configText: document.getElementById("firewallInput")?.value || "",
-					devices,
-					graphLayout: currentLayout,
-					graphFilter: getGraphFilterValue(),
-					testPath: selectedTestPath
-				};
-
-				window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+				window.localStorage.setItem(STORAGE_KEY, JSON.stringify(buildStatePayload()));
 			} catch (error) {
 				storageAvailable = false;
 				console.warn("Local storage is unavailable. Session state will not persist.", error);
+			}
+		}
+
+		function clearExpiredState() {
+			if (!storageAvailable) {
+				return;
+			}
+
+			let rawState = null;
+
+			try {
+				rawState = window.localStorage.getItem(STORAGE_KEY);
+			} catch (error) {
+				storageAvailable = false;
+				console.warn("Local storage is unavailable. Starting with defaults.", error);
+				return;
+			}
+
+			if (!rawState) {
+				return;
+			}
+
+			try {
+				const parsedState = JSON.parse(rawState);
+
+				if (!parsedState || typeof parsedState !== "object" || !parsedState.savedAt) {
+					return;
+				}
+
+				const savedAt = Number(parsedState.savedAt);
+
+				if (!Number.isFinite(savedAt) || Date.now() - savedAt > STORAGE_TTL_MS) {
+					window.localStorage.removeItem(STORAGE_KEY);
+				}
+			} catch (error) {
+				window.localStorage.removeItem(STORAGE_KEY);
+				console.warn("Corrupted saved state was cleared.", error);
 			}
 		}
 
@@ -817,7 +1034,9 @@ config rule
 					return {
 						name: String(device.name || "").trim(),
 						ip: String(device.ip || "").trim(),
-						zone: String(device.zone || "").trim()
+						zone: String(device.zone || "").trim(),
+						mac: String(device.mac || "").trim(),
+						source: String(device.source || "").trim()
 					};
 				});
 		}
@@ -833,6 +1052,658 @@ config rule
 			};
 		}
 
+		function normalisePathCriteria(value) {
+			if (!value || typeof value !== "object") {
+				return structuredClone(DEFAULT_PATH_CRITERIA);
+			}
+
+			return {
+				protocol: normaliseProtocol(value.protocol),
+				destPort: String(value.destPort || "").trim()
+			};
+		}
+
+		function importBulkHosts() {
+			const text = document.getElementById("bulkHostsInput")?.value || "";
+			const format = document.getElementById("bulkImportFormat")?.value || "auto";
+			const parsed = parseBulkHosts(text, format);
+			const result = mergeDevices(parsed.devices);
+
+			renderBulkImportResult({
+				added: result.added,
+				updated: result.updated,
+				skipped: parsed.skipped.length + result.skipped,
+				unresolved: result.unresolved,
+				skippedLines: parsed.skipped
+			});
+
+			renderDeviceInputs();
+			parseAndRender();
+		}
+
+		function clearBulkImport() {
+			const input = document.getElementById("bulkHostsInput");
+
+			if (input) {
+				input.value = "";
+			}
+
+			renderBulkImportResult({
+				added: 0,
+				updated: 0,
+				skipped: 0,
+				unresolved: 0,
+				skippedLines: []
+			});
+		}
+
+		function exportDevicesJson() {
+			const text = JSON.stringify(devices, null, 2);
+			writeExportOutput(text);
+			downloadText("openwrt-firewall-devices.json", text, "application/json");
+		}
+
+		function exportDevicesCsv() {
+			const header = "name,ip,zone,mac,source";
+			const rows = devices.map((device) => {
+				return [device.name, device.ip, device.zone, device.mac || "", device.source || ""]
+					.map(csvEscape)
+					.join(",");
+			});
+			const text = [header, ...rows].join("\n");
+			writeExportOutput(text);
+			downloadText("openwrt-firewall-devices.csv", text, "text/csv");
+		}
+
+		function exportSessionJson() {
+			const text = JSON.stringify(buildStatePayload(), null, 2);
+			writeExportOutput(text);
+			downloadText("openwrt-firewall-session.json", text, "application/json");
+		}
+
+		function exportGraphPng() {
+			if (!cy) {
+				writeExportOutput("Graph is not available.");
+				return;
+			}
+
+			const dataUrl = cy.png({
+				bg: "#020617",
+				full: true,
+				scale: 2
+			});
+			const link = document.createElement("a");
+			link.href = dataUrl;
+			link.download = "openwrt-firewall-graph.png";
+			link.click();
+			writeExportOutput("Graph PNG exported.");
+		}
+
+		function importDataFile(event) {
+			const file = event.target.files[0];
+
+			if (!file) {
+				return;
+			}
+
+			const reader = new FileReader();
+
+			reader.onload = function(e) {
+				const content = String(e.target.result || "");
+				const imported = importDataContent(content, file.name);
+				writeExportOutput(imported.message);
+				event.target.value = "";
+			};
+
+			reader.readAsText(file);
+		}
+
+		function importDataContent(content, filename = "") {
+			const trimmed = String(content || "").trim();
+
+			if (!trimmed) {
+				return { message: "Import file was empty." };
+			}
+
+			if (filename.endsWith(".csv")) {
+				const importedDevices = parseDeviceCsv(trimmed);
+				const result = mergeDevices(importedDevices);
+				renderDeviceInputs();
+				parseAndRender();
+				return { message: `Imported CSV: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped.` };
+			}
+
+			try {
+				const parsed = JSON.parse(trimmed);
+
+				if (Array.isArray(parsed)) {
+					const result = mergeDevices(normaliseSavedDevices(parsed));
+					renderDeviceInputs();
+					parseAndRender();
+					return { message: `Imported device JSON: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped.` };
+				}
+
+				if (parsed && typeof parsed === "object" && Array.isArray(parsed.devices)) {
+					applyImportedSession(parsed);
+					return { message: "Imported session JSON." };
+				}
+			} catch (error) {
+				return { message: `Import failed: ${error.message}` };
+			}
+
+			return { message: "Import file did not contain supported JSON or CSV." };
+		}
+
+		function applyImportedSession(session) {
+			const firewallInput = document.getElementById("firewallInput");
+			const graphFilter = document.getElementById("graphFilter");
+
+			if (firewallInput && typeof session.configText === "string") {
+				firewallInput.value = session.configText;
+			}
+
+			devices = normaliseSavedDevices(session.devices);
+			subnetMappingsText = typeof session.subnetMappingsText === "string" ? session.subnetMappingsText : subnetMappingsText;
+			currentLayout = normaliseGraphLayout(session.graphLayout);
+			selectedTestPath = normaliseSavedTestPath(session.testPath);
+			selectedPathCriteria = normalisePathCriteria(session.pathCriteria);
+			graphPathHighlightRequested = false;
+
+			if (graphFilter) {
+				graphFilter.value = normaliseGraphFilter(session.graphFilter);
+			}
+
+			renderSubnetMappings();
+			renderPathCriteria();
+			renderDeviceInputs();
+			parseAndRender();
+		}
+
+		function parseDeviceCsv(text) {
+			const lines = String(text || "").split(/\r?\n/).filter((line) => line.trim());
+			const firstLine = lines[0] || "";
+			const hasHeader = firstLine.toLowerCase().includes("name") && firstLine.toLowerCase().includes("ip");
+			const dataLines = hasHeader ? lines.slice(1) : lines;
+
+			return dataLines.map((line) => {
+				const parts = parseCsvLine(line);
+				const device = hasHeader
+					? mapCsvDeviceByHeader(parts, parseCsvLine(firstLine))
+					: { name: parts[0], ip: parts[1], zone: parts[2], mac: parts[3], source: parts[4] };
+
+				return normaliseImportedDevice(device);
+			}).filter((device) => isValidIpv4(device.ip));
+		}
+
+		function mapCsvDeviceByHeader(parts, header) {
+			return header.reduce((result, key, index) => {
+				result[String(key || "").trim()] = parts[index] || "";
+				return result;
+			}, {});
+		}
+
+		function parseCsvLine(line) {
+			const values = [];
+			let current = "";
+			let quoted = false;
+
+			for (let index = 0; index < line.length; index += 1) {
+				const char = line[index];
+
+				if (char === '"' && line[index + 1] === '"') {
+					current += '"';
+					index += 1;
+					continue;
+				}
+
+				if (char === '"') {
+					quoted = !quoted;
+					continue;
+				}
+
+				if (char === "," && !quoted) {
+					values.push(current);
+					current = "";
+					continue;
+				}
+
+				current += char;
+			}
+
+			values.push(current);
+			return values.map((value) => value.trim());
+		}
+
+		function compareFirewallConfig() {
+			const compareText = document.getElementById("compareFirewallInput")?.value || "";
+			const container = document.getElementById("comparisonView");
+
+			if (!container) {
+				return;
+			}
+
+			if (!compareText.trim()) {
+				container.innerHTML = `<p class="small">Paste a second firewall config before comparing.</p>`;
+				return;
+			}
+
+			const otherModel = parseOpenWrtFirewall(compareText);
+			const diff = diffFirewallModels(firewallModel, otherModel);
+
+			container.innerHTML = `
+				${renderDiffCard("Zones Added", diff.zonesAdded)}
+				${renderDiffCard("Zones Removed", diff.zonesRemoved)}
+				${renderDiffCard("Forwardings Added", diff.forwardingsAdded)}
+				${renderDiffCard("Forwardings Removed", diff.forwardingsRemoved)}
+				${renderDiffCard("Rules Added", diff.rulesAdded)}
+				${renderDiffCard("Rules Removed", diff.rulesRemoved)}
+			`;
+		}
+
+		function clearComparison() {
+			const input = document.getElementById("compareFirewallInput");
+			const output = document.getElementById("comparisonView");
+
+			if (input) {
+				input.value = "";
+			}
+
+			if (output) {
+				output.innerHTML = "";
+			}
+		}
+
+		function diffFirewallModels(current, next) {
+			return {
+				zonesAdded: diffSets(Object.keys(next.zones), Object.keys(current.zones)),
+				zonesRemoved: diffSets(Object.keys(current.zones), Object.keys(next.zones)),
+				forwardingsAdded: diffSets(next.forwardings.map(formatForwarding), current.forwardings.map(formatForwarding)),
+				forwardingsRemoved: diffSets(current.forwardings.map(formatForwarding), next.forwardings.map(formatForwarding)),
+				rulesAdded: diffSets(next.rules.map(formatRule), current.rules.map(formatRule)),
+				rulesRemoved: diffSets(current.rules.map(formatRule), next.rules.map(formatRule))
+			};
+		}
+
+		function renderDiffCard(title, values) {
+			const body = values.length > 0
+				? values.map((value) => `<li>${escapeHtml(value)}</li>`).join("")
+				: `<li class="small">None</li>`;
+
+			return `
+				<div class="finding low">
+					<strong>${escapeHtml(title)}</strong>
+					<ul>${body}</ul>
+				</div>
+			`;
+		}
+
+		function diffSets(left, right) {
+			const rightSet = new Set(right);
+			return left.filter((item) => !rightSet.has(item));
+		}
+
+		function formatForwarding(forwarding) {
+			return `${forwarding.src || "any"} -> ${forwarding.dest || "any"}`;
+		}
+
+		function formatRule(rule) {
+			return `${rule.name}|${rule.src}|${rule.dest}|${rule.srcIp}|${rule.destIp}|${rule.proto}|${rule.destPort}|${rule.target}`;
+		}
+
+		function writeExportOutput(text) {
+			const output = document.getElementById("exportOutput");
+
+			if (output) {
+				output.value = text;
+			}
+		}
+
+		function buildStatePayload() {
+			return {
+				version: 1,
+				savedAt: Date.now(),
+				configText: document.getElementById("firewallInput")?.value || "",
+				devices,
+				subnetMappingsText,
+				graphLayout: currentLayout,
+				graphFilter: getGraphFilterValue(),
+				testPath: selectedTestPath,
+				pathCriteria: selectedPathCriteria
+			};
+		}
+
+		function downloadText(filename, text, mimeType) {
+			const blob = new Blob([text], { type: mimeType });
+			const url = URL.createObjectURL(blob);
+			const link = document.createElement("a");
+			link.href = url;
+			link.download = filename;
+			link.click();
+			URL.revokeObjectURL(url);
+		}
+
+		function csvEscape(value) {
+			const text = String(value || "");
+
+			if (/[",\n]/.test(text)) {
+				return `"${text.replaceAll('"', '""')}"`;
+			}
+
+			return text;
+		}
+
+		function parseBulkHosts(text, format = "auto") {
+			const subnetMappings = parseSubnetMappings(subnetMappingsText);
+			const result = {
+				devices: [],
+				skipped: []
+			};
+
+			String(text || "").split(/\r?\n/).forEach((line, index) => {
+				const parsed = parseHostLine(line, format, subnetMappings);
+
+				if (parsed) {
+					result.devices.push(parsed);
+					return;
+				}
+
+				if (line.trim() && !line.trim().startsWith("#")) {
+					result.skipped.push(`Line ${index + 1}: ${line.trim()}`);
+				}
+			});
+
+			return result;
+		}
+
+		function parseHostLine(line, format = "auto", subnetMappings = []) {
+			const trimmed = String(line || "").trim();
+
+			if (!trimmed || trimmed.startsWith("#")) {
+				return null;
+			}
+
+			if (format === "dhcp" || format === "auto") {
+				const dhcp = parseDhcpLeaseLine(trimmed, subnetMappings);
+
+				if (dhcp || format === "dhcp") {
+					return dhcp;
+				}
+			}
+
+			if (format === "neighbour" || format === "auto") {
+				const neighbour = parseNeighbourLine(trimmed, subnetMappings);
+
+				if (neighbour || format === "neighbour") {
+					return neighbour;
+				}
+			}
+
+			return parseSimpleHostLine(trimmed, subnetMappings);
+		}
+
+		function parseSimpleHostLine(line, subnetMappings) {
+			const parts = line.split(/\s+/);
+
+			if (parts.length < 2) {
+				return null;
+			}
+
+			let ip = "";
+			let name = "";
+			let zone = "";
+
+			if (isValidIpv4(parts[0])) {
+				ip = parts[0];
+				name = parts[1] || parts[0];
+				zone = parts[2] || "";
+			} else if (isValidIpv4(parts[1])) {
+				name = parts[0];
+				ip = parts[1];
+				zone = parts[2] || "";
+			}
+
+			if (!ip) {
+				return null;
+			}
+
+			return normaliseImportedDevice({
+				name,
+				ip,
+				zone: zone || inferZoneForIp(ip, subnetMappings),
+				source: "host-list"
+			});
+		}
+
+		function parseNeighbourLine(line, subnetMappings) {
+			const arpMatch = line.match(/^(.*?)\s*\((\d{1,3}(?:\.\d{1,3}){3})\)\s+at\s+([0-9a-f:.-]+).*?\son\s+(\S+)/i);
+
+			if (arpMatch && isValidIpv4(arpMatch[2])) {
+				const name = arpMatch[1] && arpMatch[1] !== "?" ? arpMatch[1] : arpMatch[2];
+				const zone = inferZoneForIp(arpMatch[2], subnetMappings) || zoneFromInterface(arpMatch[4]);
+
+				return normaliseImportedDevice({
+					name,
+					ip: arpMatch[2],
+					zone,
+					mac: arpMatch[3],
+					source: "arp"
+				});
+			}
+
+			const parts = line.split(/\s+/);
+			const ip = parts[0];
+			const devIndex = parts.indexOf("dev");
+			const macIndex = parts.indexOf("lladdr");
+
+			if (!isValidIpv4(ip) || devIndex === -1) {
+				return null;
+			}
+
+			const iface = parts[devIndex + 1] || "";
+			const mac = macIndex !== -1 ? parts[macIndex + 1] || "" : "";
+			const zone = inferZoneForIp(ip, subnetMappings) || zoneFromInterface(iface);
+
+			return normaliseImportedDevice({
+				name: ip,
+				ip,
+				zone,
+				mac,
+				source: "neighbour"
+			});
+		}
+
+		function parseDhcpLeaseLine(line, subnetMappings) {
+			const parts = line.split(/\s+/);
+
+			if (parts.length < 3 || !/^\d+$/.test(parts[0]) || !isValidIpv4(parts[2])) {
+				return null;
+			}
+
+			const hostname = parts[3] && parts[3] !== "*" ? parts[3] : parts[2];
+
+			return normaliseImportedDevice({
+				name: hostname,
+				ip: parts[2],
+				zone: inferZoneForIp(parts[2], subnetMappings),
+				mac: parts[1] || "",
+				source: "dhcp"
+			});
+		}
+
+		function normaliseImportedDevice(device) {
+			return {
+				name: String(device.name || device.ip || "Imported Host").trim(),
+				ip: String(device.ip || "").trim(),
+				zone: String(device.zone || "").trim(),
+				mac: String(device.mac || "").trim(),
+				source: String(device.source || "import").trim()
+			};
+		}
+
+		function mergeDevices(importedDevices) {
+			const result = {
+				added: 0,
+				updated: 0,
+				skipped: 0,
+				unresolved: 0
+			};
+			const deviceByIp = new Map(devices.map((device, index) => [device.ip, { device, index }]));
+
+			importedDevices.forEach((imported) => {
+				if (!isValidIpv4(imported.ip)) {
+					result.skipped += 1;
+					return;
+				}
+
+				if (!imported.zone) {
+					result.unresolved += 1;
+				}
+
+				const existing = deviceByIp.get(imported.ip);
+
+				if (existing) {
+					let changed = false;
+
+					if ((!existing.device.name || existing.device.name === existing.device.ip) && imported.name) {
+						existing.device.name = imported.name;
+						changed = true;
+					}
+
+					if (!existing.device.zone && imported.zone) {
+						existing.device.zone = imported.zone;
+						changed = true;
+					}
+
+					if (!existing.device.mac && imported.mac) {
+						existing.device.mac = imported.mac;
+						changed = true;
+					}
+
+					if (changed) {
+						result.updated += 1;
+					}
+
+					return;
+				}
+
+				devices.push({
+					name: imported.name || imported.ip,
+					ip: imported.ip,
+					zone: imported.zone,
+					mac: imported.mac,
+					source: imported.source
+				});
+				result.added += 1;
+			});
+
+			return result;
+		}
+
+		function renderBulkImportResult(result) {
+			const container = document.getElementById("bulkImportResult");
+
+			if (!container) {
+				return;
+			}
+
+			const skippedLines = result.skippedLines && result.skippedLines.length > 0
+				? `<br><span class="small">${escapeHtml(result.skippedLines.slice(0, 3).join(" | "))}</span>`
+				: "";
+
+			container.innerHTML = `
+				<span class="info">${result.added}</span> added,
+				<span class="info">${result.updated}</span> updated,
+				<span class="${result.unresolved ? "warn" : "info"}">${result.unresolved}</span> unresolved,
+				<span class="${result.skipped ? "warn" : "info"}">${result.skipped}</span> skipped
+				${skippedLines}
+			`;
+		}
+
+		function parseSubnetMappings(text) {
+			return String(text || "").split(/\r?\n/)
+				.map((line) => line.trim())
+				.filter((line) => line && !line.startsWith("#"))
+				.map((line) => {
+					const parts = line.split(/\s+/);
+					const cidr = parseCidr(parts[0]);
+
+					if (!cidr || !parts[1]) {
+						return null;
+					}
+
+					return {
+						...cidr,
+						zone: parts[1]
+					};
+				})
+				.filter(Boolean);
+		}
+
+		function inferZoneForIp(ip, subnetMappings = parseSubnetMappings(subnetMappingsText)) {
+			const ipNumber = ipv4ToNumber(ip);
+
+			if (ipNumber === null) {
+				return "";
+			}
+
+			const match = subnetMappings.find((mapping) => {
+				return ((ipNumber & mapping.mask) >>> 0) === mapping.network;
+			});
+
+			return match ? match.zone : "";
+		}
+
+		function parseCidr(value) {
+			const match = String(value || "").match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/);
+
+			if (!match) {
+				return null;
+			}
+
+			const ipNumber = ipv4ToNumber(match[1]);
+			const prefix = Number(match[2]);
+
+			if (ipNumber === null || prefix < 0 || prefix > 32) {
+				return null;
+			}
+
+			const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+
+			return {
+				network: (ipNumber & mask) >>> 0,
+				mask,
+				prefix
+			};
+		}
+
+		function isValidIpv4(value) {
+			return ipv4ToNumber(value) !== null;
+		}
+
+		function ipv4ToNumber(value) {
+			const parts = String(value || "").split(".");
+
+			if (parts.length !== 4) {
+				return null;
+			}
+
+			const octets = parts.map((part) => Number(part));
+
+			if (octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+				return null;
+			}
+
+			return (((octets[0] << 24) >>> 0) + (octets[1] << 16) + (octets[2] << 8) + octets[3]) >>> 0;
+		}
+
+		function zoneFromInterface(iface) {
+			return String(iface || "")
+				.replace(/^br-/, "")
+				.replace(/^eth\d+\./, "")
+				.replace(/^wlan\d+-/, "")
+				.trim();
+		}
+
 		function updateSelectedTestPathFromSelectors() {
 			const srcSelect = document.getElementById("srcDevice");
 			const dstSelect = document.getElementById("dstDevice");
@@ -843,6 +1714,13 @@ config rule
 			};
 
 			normaliseSelectedTestPath();
+		}
+
+		function updatePathCriteriaFromInputs() {
+			selectedPathCriteria = {
+				protocol: normaliseProtocol(document.getElementById("pathProtocol")?.value),
+				destPort: String(document.getElementById("pathDestPort")?.value || "").trim()
+			};
 		}
 
 		function normaliseSelectedTestPath() {
@@ -874,6 +1752,72 @@ config rule
 
 		function normaliseGraphLayout(value) {
 			return VALID_GRAPH_LAYOUTS.includes(value) ? value : "cose";
+		}
+
+		function normaliseProtocol(value) {
+			const protocol = String(value || "").trim().toLowerCase();
+			return ["tcp", "udp", "icmp"].includes(protocol) ? protocol : "";
+		}
+
+		function ruleProtocolMatches(ruleProto, criteriaProtocol) {
+			const protocol = normaliseProtocol(criteriaProtocol);
+
+			if (!protocol) {
+				return true;
+			}
+
+			const ruleProtocols = String(ruleProto || "")
+				.toLowerCase()
+				.split(/[\s,]+/)
+				.filter(Boolean);
+
+			if (ruleProtocols.length === 0 || ruleProtocols.includes("all")) {
+				return true;
+			}
+
+			if (ruleProtocols.includes("tcpudp")) {
+				return protocol === "tcp" || protocol === "udp";
+			}
+
+			return ruleProtocols.includes(protocol);
+		}
+
+		function rulePortMatches(ruleDestPort, criteriaDestPort) {
+			const port = Number(String(criteriaDestPort || "").trim());
+
+			if (!Number.isInteger(port) || port < 1 || port > 65535) {
+				return true;
+			}
+
+			const rulePortText = String(ruleDestPort || "").trim();
+
+			if (!rulePortText) {
+				return true;
+			}
+
+			return rulePortText
+				.split(/[\s,]+/)
+				.filter(Boolean)
+				.some((part) => portExpressionMatches(part, port));
+		}
+
+		function portExpressionMatches(expression, port) {
+			const rangeMatch = String(expression).match(/^(\d+)-(\d+)$/);
+
+			if (rangeMatch) {
+				const start = Number(rangeMatch[1]);
+				const end = Number(rangeMatch[2]);
+				return Number.isInteger(start) && Number.isInteger(end) && port >= start && port <= end;
+			}
+
+			return Number(expression) === port;
+		}
+
+		function formatPathCriteria(criteria) {
+			const pathCriteria = normalisePathCriteria(criteria);
+			const protocol = pathCriteria.protocol ? pathCriteria.protocol.toUpperCase() : "Any protocol";
+			const port = pathCriteria.destPort ? `port ${pathCriteria.destPort}` : "any port";
+			return `${protocol} / ${port}`;
 		}
 
 		function setCurrentYear() {
@@ -969,7 +1913,12 @@ config rule
 				}
 
 				if (section.type === "rule") {
+					const unsupportedFields = Object.keys(section.options).filter((key) => {
+						return !SUPPORTED_RULE_FIELDS.includes(key);
+					});
+
 					model.rules.push({
+						index: model.rules.length + 1,
 						name: section.options.name || section.name || "Unnamed rule",
 						src: section.options.src || "",
 						dest: section.options.dest || "",
@@ -977,7 +1926,8 @@ config rule
 						destIp: section.options.dest_ip || "",
 						proto: section.options.proto || "",
 						destPort: section.options.dest_port || "",
-						target: section.options.target || ""
+						target: section.options.target || "",
+						unsupportedFields
 					});
 				}
 			});
@@ -1123,6 +2073,15 @@ config rule
 			relationships.forEach((item) => {
 				const div = document.createElement("div");
 				div.className = `relationship ${item.decision.allowed ? "allowed" : "blocked"}`;
+				div.tabIndex = 0;
+				div.setAttribute("role", "button");
+				div.addEventListener("click", () => selectRelationshipPath(item.srcIndex, item.dstIndex));
+				div.addEventListener("keydown", (event) => {
+					if (event.key === "Enter" || event.key === " ") {
+						event.preventDefault();
+						selectRelationshipPath(item.srcIndex, item.dstIndex);
+					}
+				});
 
 				div.innerHTML = `
 					<strong>${item.decision.allowed ? "✅ ALLOWED" : "⛔ BLOCKED"}</strong>
@@ -1140,10 +2099,152 @@ config rule
 			});
 		}
 
+		function renderAnalysisFindings() {
+			const container = document.getElementById("analysisView");
+
+			if (!container) {
+				return;
+			}
+
+			const findings = buildAnalysisFindings();
+
+			if (findings.length === 0) {
+				container.innerHTML = `<p class="small">No relationship findings detected for the current model.</p>`;
+				return;
+			}
+
+			container.innerHTML = findings.map((finding) => {
+				return `
+					<div class="finding ${escapeHtml(finding.severity)}">
+						<strong>${escapeHtml(finding.title)}</strong>
+						<p class="small">${escapeHtml(finding.detail)}</p>
+					</div>
+				`;
+			}).join("");
+		}
+
+		function buildAnalysisFindings() {
+			const findings = [];
+			const zones = Object.keys(firewallModel.zones);
+
+			devices.forEach((src) => {
+				devices.forEach((dst) => {
+					if (src === dst) {
+						return;
+					}
+
+					const decision = evaluateDevicePath(src, dst);
+					const srcRole = classifyZone(src.zone);
+					const dstRole = classifyZone(dst.zone);
+
+					if (!decision.allowed) {
+						return;
+					}
+
+					if (src.zone === dst.zone && srcRole === "iot") {
+						addFinding(findings, "high", "IoT east-west communication", `${src.name} can reach ${dst.name} inside ${src.zone}. ${decision.reason}`);
+					}
+
+					if (srcRole === "guest" && dstRole === "lan") {
+						addFinding(findings, "high", "Guest to LAN exposure", `${src.name} can reach ${dst.name}. ${decision.reason}`);
+					}
+
+					if (srcRole === "guest" && dstRole === "server") {
+						addFinding(findings, "high", "Guest to server exposure", `${src.name} can reach ${dst.name}. ${decision.reason}`);
+					}
+
+					if (srcRole === "server" && dstRole === "iot") {
+						addFinding(findings, "medium", "Server to IoT exposure", `${src.name} can reach ${dst.name}. ${decision.reason}`);
+					}
+				});
+			});
+
+			zones.forEach((zone) => {
+				const model = firewallModel.zones[zone];
+
+				if (normaliseTarget(model.forward) === "ACCEPT") {
+					addFinding(findings, "medium", "Zone with unrestricted forwarding", `${zone} has forward policy ACCEPT.`);
+				}
+
+				const outboundForwardings = firewallModel.forwardings.filter((forwarding) => forwarding.src === zone);
+
+				if (outboundForwardings.length > Math.max(1, zones.length / 2)) {
+					addFinding(findings, "medium", "Excessive zone trust", `${zone} forwards to ${outboundForwardings.map((item) => item.dest).join(", ")}.`);
+				}
+			});
+
+			if (zones.length > 2) {
+				const fullMesh = zones.every((src) => {
+					return zones.every((dst) => src === dst || evaluateZonePath(src, dst).allowed);
+				});
+
+				if (fullMesh) {
+					addFinding(findings, "high", "Full mesh zone communication", "Every zone can reach every other zone.");
+				}
+			}
+
+			firewallModel.rules.forEach((rule) => {
+				const target = normaliseTarget(rule.target);
+				const srcRole = classifyZone(rule.src);
+				const dstRole = classifyZone(rule.dest);
+
+				if (target === "ACCEPT" && (srcRole === "iot" || srcRole === "guest") && dstRole !== "wan") {
+					addFinding(findings, "medium", "Device exception bypassing segmentation", `Rule #${rule.index} ${rule.name} allows ${rule.src || "any"} to ${rule.dest || "any"}.`);
+				}
+
+				if (rule.unsupportedFields && rule.unsupportedFields.length > 0) {
+					addFinding(findings, "low", "Unsupported rule fields present", `Rule #${rule.index} ${rule.name} includes unsupported fields: ${rule.unsupportedFields.join(", ")}.`);
+				}
+			});
+
+			return findings;
+		}
+
+		function addFinding(findings, severity, title, detail) {
+			const key = `${severity}:${title}:${detail}`;
+
+			if (findings.some((finding) => finding.key === key)) {
+				return;
+			}
+
+			findings.push({
+				key,
+				severity,
+				title,
+				detail
+			});
+		}
+
+		function classifyZone(zoneName) {
+			const zone = String(zoneName || "").toLowerCase();
+
+			if (zone.includes("guest")) {
+				return "guest";
+			}
+
+			if (zone.includes("iot")) {
+				return "iot";
+			}
+
+			if (zone.includes("server") || zone.includes("srv") || zone.includes("dmz")) {
+				return "server";
+			}
+
+			if (zone.includes("lan")) {
+				return "lan";
+			}
+
+			if (zone.includes("wan")) {
+				return "wan";
+			}
+
+			return "other";
+		}
+
 		function renderGraph(layoutName = null) {
 			if (layoutName) {
 				currentLayout = normaliseGraphLayout(layoutName);
-				saveToLocalStorage();
+				saveState();
 			}
 
 			const elements = buildGraphElements();
@@ -1272,8 +2373,8 @@ config rule
 
 		function handleGraphFilterChange() {
 			renderGraph();
-			renderCurrentTestResult(false);
-			saveToLocalStorage();
+			renderCurrentTestResult(false, { highlight: graphPathHighlightRequested });
+			saveState();
 		}
 
 		function buildGraphElements() {
@@ -1490,8 +2591,19 @@ config rule
 			connectedNodes.removeClass("faded").addClass("highlighted");
 		}
 
-		function renderCurrentTestResult(persist = true) {
+		function selectRelationshipPath(srcIndex, dstIndex) {
+			selectedTestPath = {
+				srcIndex: String(srcIndex),
+				dstIndex: String(dstIndex)
+			};
+			graphPathHighlightRequested = true;
+			renderDeviceSelectors();
+			testDevicePath(true, { highlight: true });
+		}
+
+		function renderCurrentTestResult(persist = true, options = {}) {
 			const result = document.getElementById("testResult");
+			const shouldHighlight = options.highlight === true;
 
 			if (!result) {
 				return;
@@ -1501,23 +2613,26 @@ config rule
 				result.innerHTML = "Add a device to test traffic between devices.";
 
 				if (persist) {
-					saveToLocalStorage();
+					saveState();
 				}
 
 				return;
 			}
 
-			testDevicePath(persist);
+			testDevicePath(persist, { highlight: shouldHighlight });
 		}
 
-		function testDevicePath(persist = true) {
+		function testDevicePath(persist = true, options = {}) {
+			const shouldHighlight = options.highlight !== false;
 			const srcIndex = document.getElementById("srcDevice").value;
 			const dstIndex = document.getElementById("dstDevice").value;
 
+			updatePathCriteriaFromInputs();
 			selectedTestPath = {
 				srcIndex,
 				dstIndex
 			};
+			graphPathHighlightRequested = shouldHighlight;
 
 			const src = devices[srcIndex];
 			const dst = devices[dstIndex];
@@ -1526,13 +2641,14 @@ config rule
 				document.getElementById("testResult").innerHTML = "Select two devices and test whether traffic is allowed.";
 
 				if (persist) {
-					saveToLocalStorage();
+					saveState();
 				}
 
 				return;
 			}
 
-			const decision = evaluateDevicePath(src, dst);
+			const decision = evaluateDevicePath(src, dst, selectedPathCriteria);
+			const criteriaLabel = formatPathCriteria(selectedPathCriteria);
 
 			document.getElementById("testResult").innerHTML = `
 				<strong class="${decision.allowed ? "allow" : "deny"}">
@@ -1543,13 +2659,17 @@ config rule
 				➡️
 				${escapeHtml(dst.name)} (${escapeHtml(dst.ip)} / ${escapeHtml(dst.zone)})
 				<br>
+				<span class="small">${escapeHtml(criteriaLabel)}</span>
+				<br>
 				<span class="small">${escapeHtml(decision.reason)}</span>
 			`;
 
-			highlightTestedPath(Number(srcIndex), Number(dstIndex));
+			if (shouldHighlight) {
+				highlightTestedPath(Number(srcIndex), Number(dstIndex));
+			}
 
 			if (persist) {
-				saveToLocalStorage();
+				saveState();
 			}
 		}
 
@@ -1571,13 +2691,17 @@ config rule
 			edge.removeClass("faded").addClass("highlighted");
 		}
 
-		function evaluateDevicePath(srcDevice, dstDevice) {
-			const matchingSpecificRule = findMatchingSpecificRule(srcDevice, dstDevice);
+		function evaluateDevicePath(srcDevice, dstDevice, criteria = {}) {
+			const pathCriteria = normalisePathCriteria(criteria);
+			const matchingSpecificRule = findMatchingSpecificRule(srcDevice, dstDevice, pathCriteria);
 
 			if (matchingSpecificRule) {
+				const target = normaliseTarget(matchingSpecificRule.target);
+
 				return {
-					allowed: normaliseTarget(matchingSpecificRule.target) === "ACCEPT",
-					reason: `Matched specific rule: ${matchingSpecificRule.name} (${matchingSpecificRule.target})`
+					allowed: target === "ACCEPT",
+					target,
+					reason: `Matched rule #${matchingSpecificRule.index}: ${matchingSpecificRule.name} (${target || "unspecified target"})`
 				};
 			}
 
@@ -1623,14 +2747,18 @@ config rule
 			};
 		}
 
-		function findMatchingSpecificRule(srcDevice, dstDevice) {
+		function findMatchingSpecificRule(srcDevice, dstDevice, criteria = {}) {
+			const pathCriteria = normalisePathCriteria(criteria);
+
 			return firewallModel.rules.find((rule) => {
 				const srcZoneMatches = !rule.src || rule.src === srcDevice.zone;
 				const dstZoneMatches = !rule.dest || rule.dest === dstDevice.zone;
 				const srcIpMatches = !rule.srcIp || rule.srcIp === srcDevice.ip;
 				const dstIpMatches = !rule.destIp || rule.destIp === dstDevice.ip;
+				const protocolMatches = ruleProtocolMatches(rule.proto, pathCriteria.protocol);
+				const destPortMatches = rulePortMatches(rule.destPort, pathCriteria.destPort);
 
-				return srcZoneMatches && dstZoneMatches && srcIpMatches && dstIpMatches;
+				return srcZoneMatches && dstZoneMatches && srcIpMatches && dstIpMatches && protocolMatches && destPortMatches;
 			});
 		}
 

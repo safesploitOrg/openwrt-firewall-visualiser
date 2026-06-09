@@ -351,7 +351,7 @@ The example is useful for demonstrating the relationship views, but it should no
 | Simplified parser | Good for common UCI files, not a complete UCI interpreter |
 | Simplified decision engine | Useful for visual exploration, not a full firewall simulation |
 | Protocol and port fields are not evaluated | Per-service conclusions may be inaccurate |
-| Browser-local persistence | Saved state is per browser/profile and is not portable without a future import/export feature |
+| Browser-local persistence | Saved state is per browser/profile unless exported as JSON |
 | CDN dependency | Graph rendering depends on external script availability |
 | No automated tests | Behaviour is currently verified manually |
 
@@ -373,8 +373,9 @@ Stored fields:
 
 Relevant functions:
 
-- `saveToLocalStorage()`.
-- `loadFromLocalStorage()`.
+- `saveState()`.
+- `loadState()`.
+- `clearExpiredState()`.
 - `readStoredState()`.
 - `normaliseSavedDevices()`.
 - `normaliseSavedTestPath()`.
@@ -415,13 +416,13 @@ Relevant functions and elements:
 - `#currentYear`.
 - `setCurrentYear()`.
 
-## Future Enhancements
+## Implemented Future Enhancements
 
-The following planned phases continue the roadmap sequence after implemented Phase A-C.
+The following phases continue the roadmap sequence after Phase A-C and are now implemented in `public/index.html`.
 
 ### Phase D: Local Storage Lifecycle Management
 
-Status: planned.
+Status: implemented.
 
 Objective: prevent stale browser state from living indefinitely while keeping the local-first workflow.
 
@@ -434,19 +435,18 @@ Requirements:
 - Handle corrupted `localStorage` data gracefully.
 - Preserve backwards compatibility where possible for existing saved payloads.
 
-Implementation notes:
+Implemented details:
 
-- Keep `STORAGE_KEY` as the stable state namespace.
-- Introduce `STORAGE_TTL_DAYS = 45`.
-- Store `savedAt` or equivalent metadata in the persisted payload.
-- Implement `saveState()`.
-- Implement `loadState()`.
-- Implement `clearExpiredState()`.
-- Call `clearExpiredState()` during startup before applying saved state.
+- `STORAGE_KEY` remains the stable state namespace.
+- `STORAGE_TTL_DAYS = 45` defines expiry.
+- `savedAt` is stored in the persisted payload.
+- `saveState()` writes the timestamped state.
+- `loadState()` restores state and falls back to defaults.
+- `clearExpiredState()` silently removes expired or corrupted payloads on startup.
 
 ### Phase E: Graph Initial State Improvements
 
-Status: planned.
+Status: implemented.
 
 Objective: improve first-load user experience by preventing automatic path highlighting.
 
@@ -458,15 +458,16 @@ Requirements:
 - No path should be highlighted until the user explicitly clicks a graph node.
 - No path should be highlighted until the user explicitly clicks a relationship entry.
 
-Implementation notes:
+Implemented details:
 
-- Separate path-result rendering from graph path highlighting.
-- Track whether the user has explicitly requested a path highlight.
-- Keep automatic path re-evaluation for text results, but defer graph highlighting until user action.
+- Path-result rendering is separated from graph path highlighting.
+- `graphPathHighlightRequested` tracks explicit path-highlighting intent.
+- Automatic re-renders update text results without selecting graph elements.
+- Graph highlighting is triggered only by "Test Path", graph node clicks, or relationship-card clicks.
 
 ### Phase F: Bulk Host Import
 
-Status: planned.
+Status: implemented.
 
 Objective: allow users to populate devices from existing network inventories instead of manually adding hosts one at a time.
 
@@ -503,13 +504,13 @@ Supported Linux neighbour table format:
 172.16.20.11 dev br-iot lladdr aa:bb:cc:dd:ee:00 STALE
 ```
 
-Implementation notes:
+Implemented details:
 
-- Create `importBulkHosts()`.
-- Create `parseBulkHosts()`.
-- Create `parseHostLine()`.
-- Create `mergeDevices()`.
-- Report skipped or unrecognised lines without blocking valid imports.
+- `importBulkHosts()` imports the textarea content.
+- `parseBulkHosts()` parses host data line-by-line.
+- `parseHostLine()` handles host-list, neighbour/ARP, and DHCP lease formats.
+- `mergeDevices()` merges by IP without overwriting manually supplied names or zones.
+- Skipped and unresolved lines are reported in the import result panel.
 
 Benefits:
 
@@ -519,7 +520,7 @@ Benefits:
 
 ### Phase G: Zone Inference Engine
 
-Status: planned.
+Status: partially implemented.
 
 Objective: automatically assign firewall zones from subnet definitions when imported hosts do not include a zone.
 
@@ -551,16 +552,25 @@ Expected inferred result:
 zone = iot
 ```
 
-Implementation notes:
+Implemented details:
 
-- Add a subnet mapping input area.
-- Parse CIDR notation into comparable network ranges.
-- Apply inference during bulk import and device normalisation.
-- Surface unresolved hosts so the user can assign zones manually.
+- The `subnetMappings` textarea stores subnet-to-zone mappings.
+- `parseSubnetMappings()` parses CIDR mappings.
+- `inferZoneForIp()` assigns zones during import when a host line has no explicit zone.
+- Unresolved imported hosts are counted in the import result panel.
+
+Todo:
+
+- Supported Input Formats
+    - 1. Manual Zone/Subnet Mapping (done)
+    - 2. OpenWRT UCI Export (todo)
+        - uci show firewall | grep "\.network=" 
+        - uci show network | grep -E "\.(ipaddr|netmask|proto)="
+- 
 
 ### Phase H: Network Discovery Importers
 
-Status: planned.
+Status: partially implemented.
 
 Objective: support importing host data directly from common network tooling output.
 
@@ -571,16 +581,28 @@ Initial import targets:
 - OpenWrt `ip neighbour`.
 - OpenWrt `cat /tmp/dhcp.leases`, preferably because it includes hostnames.
 
-Implementation notes:
+Implemented details:
 
-- Feed parsed importer output into the Phase F bulk host import path.
-- Prefer hostnames from DHCP lease data when available.
-- Fall back to IP-only device names when no hostname is present.
-- Preserve raw importer output for troubleshooting skipped lines.
+- `parseNeighbourLine()` supports Linux/OpenWrt `ip neighbour` and common `arp -a` output.
+- `parseDhcpLeaseLine()` supports OpenWrt `/tmp/dhcp.leases`.
+- DHCP hostnames are preferred when present.
+- IP-only names are used when no hostname is available.
+- Skipped source lines are shown in the import result panel.
+
+TODO:
+
+- Better placeholder for different import methods
+- Support for `openwrt_export_hosts.sh` script
+    - ip,hostname,zone,mac
+        172.16.20.10,Alexa-Kitchen,iot,aa:bb:cc:dd:ee:ff
+        172.16.20.11,Alexa-Bedroom,iot,aa:bb:cc:dd:ee:00
+        172.16.30.25,Guest-Phone,guest,aa:bb:cc:dd:ee:11
+    - ? button which points to the script
+- 
 
 ### Phase I: Relationship Analysis Engine
 
-Status: planned.
+Status: implemented.
 
 Objective: move beyond visualisation and provide automated security analysis.
 
@@ -595,40 +617,46 @@ Requirements:
 - Detect zones with unrestricted forwarding.
 - Detect device exceptions that bypass segmentation.
 
-Implementation notes:
+Implemented details:
 
-- Build analysis rules on top of `evaluateZonePath()` and `evaluateDevicePath()`.
-- Return findings with severity, affected source, affected destination, and reason.
-- Add a findings panel before recommending changes.
+- `buildAnalysisFindings()` builds findings on top of `evaluateZonePath()` and `evaluateDevicePath()`.
+- Findings include severity, title, and reason.
+- `renderAnalysisFindings()` renders the findings panel.
 
 ### Phase J: Rule Engine Accuracy
 
-Status: planned.
+Status: implemented.
 
-Improve decision accuracy before adding policy recommendations.
+Decision accuracy has been improved before adding policy recommendations.
 
-Candidate improvements:
+Implemented improvements:
 
 - Honour protocol matching.
 - Honour destination port matching.
 - Represent rule order more explicitly in explanations.
 - Distinguish `ACCEPT`, `REJECT`, and `DROP`.
 - Surface unsupported rule fields in the UI.
-- Consider zone `input` and `output` policies where relevant.
+- Keep zone `input` and `output` visible in zone cards while forwarding decisions remain based on zone forwardings and same-zone forward policy.
 
 ### Phase K: Import, Export, And Comparison
 
-Status: planned.
+Status: Mostly.
 
-Add workflows for longer-lived analysis.
+Workflows for longer-lived analysis are now available.
 
-Candidate improvements:
+Implemented improvements:
 
 - Export device mappings as JSON or CSV.
 - Import saved device mappings.
 - Export graph images.
 - Compare two firewall configs.
 - Show before/after impact for changed forwardings and rules.
+
+Todo:
+
+- Clear colour coding for Export Session
+- Clearer button for Import Session
+
 
 ## Development Notes
 

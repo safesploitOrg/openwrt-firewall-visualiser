@@ -100,6 +100,35 @@
 			border-color: var(--info);
 		}
 
+		.button-info {
+			border-color: rgba(56, 189, 248, 0.7);
+		}
+
+		.button-good {
+			border-color: rgba(34, 197, 94, 0.7);
+		}
+
+		.button-warn {
+			border-color: rgba(245, 158, 11, 0.7);
+		}
+
+		.file-label {
+			display: inline-flex;
+			align-items: center;
+			gap: 0.4rem;
+			background: var(--panel-soft);
+			color: var(--text);
+			border: 1px solid rgba(34, 197, 94, 0.7);
+			border-radius: 8px;
+			padding: 0.55rem 0.7rem;
+			cursor: pointer;
+			font-weight: 700;
+		}
+
+		.file-label input {
+			display: none;
+		}
+
 		input {
 			min-width: 0;
 		}
@@ -113,7 +142,7 @@
 
 		.help-row {
 			display: flex;
-			align-items: centre;
+			align-items: center;
 			justify-content: space-between;
 			gap: 0.75rem;
 			margin-bottom: 0.5rem;
@@ -352,6 +381,12 @@
 			min-height: 150px;
 		}
 
+		.show-more-row {
+			grid-column: 1 / -1;
+			margin-top: 0.75rem;
+			text-align: center;
+		}
+
 		.compare-grid {
 			display: grid;
 			grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -361,6 +396,22 @@
 
 		.graph-panel {
 			margin-top: 1.5rem;
+		}
+
+		.graph-panel.expanded {
+			position: fixed;
+			inset: 1rem;
+			z-index: 20;
+			margin: 0;
+			padding: 1rem;
+			background: var(--panel);
+			border: 1px solid var(--border);
+			border-radius: 14px;
+			overflow: auto;
+		}
+
+		.graph-panel.expanded #cy {
+			height: calc(100vh - 190px);
 		}
 
 		.graph-toolbar {
@@ -481,8 +532,8 @@
 			<textarea id="firewallInput" spellcheck="false"></textarea>
 
 			<div class="controls">
-				<button onclick="loadExample()">Load Example</button>
-				<button onclick="parseAndRender()">Parse Firewall</button>
+				<button onclick="loadExample()">Reset All Configs</button>
+				<!-- <button onclick="parseAndRender()">Parse Firewall</button> -->
 				<input type="file" id="configFile" accept=".txt,.conf,.firewall" onchange="loadConfigFile(event)" />
 			</div>
 
@@ -503,17 +554,33 @@
 			<section class="tool-section">
 				<h3>Subnet Mappings</h3>
 				<textarea id="subnetMappings" class="compact-textarea" spellcheck="false" onchange="handleSubnetMappingsChange()"></textarea>
+				<textarea id="uciSubnetInput" class="compact-textarea" spellcheck="false" placeholder="Paste OpenWrt UCI export lines, for example:&#10;uci show firewall | grep &quot;\\.network=&quot;&#10;uci show firewall | grep &quot;\\.name=&quot;&#10;uci show network | grep -E &quot;\\.(ipaddr|netmask|proto)=&quot;"></textarea>
+				<div class="controls">
+					<button class="button-info" onclick="importUciSubnetMappings()">Import UCI Subnets</button>
+					<button onclick="clearUciSubnetInput()">Clear UCI Input</button>
+				</div>
+				<div id="uciSubnetResult" class="result small import-result">No UCI subnet import run yet.</div>
 			</section>
 
 			<section class="tool-section">
-				<h3>Bulk Import Hosts</h3>
+				<div class="help-row">
+					<h3>Bulk Import Hosts</h3>
+					<button class="help-btn" type="button" onclick="toggleImportHelp()">?</button>
+				</div>
+				<div id="importHelpBox" class="help-box hidden">
+					<p><strong>Supported inputs:</strong> host lists, <code>ip neighbour</code>, <code>arp -a</code>, <code>cat /tmp/dhcp.leases</code>, and CSV from <a href="../scripts/openwrt_export_hosts.sh">scripts/openwrt_export_hosts.sh</a>.</p>
+					<pre>scp scripts/openwrt_export_hosts.sh root@172.16.0.1:/tmp/
+ssh root@172.16.0.1 sh /tmp/openwrt_export_hosts.sh</pre>
+					<p class="small">The script output format is <code>ip,hostname,zone,mac</code>.</p>
+				</div>
 				<select id="bulkImportFormat">
 					<option value="auto">Auto detect</option>
 					<option value="host-list">Host list</option>
 					<option value="neighbour">Neighbour / ARP table</option>
 					<option value="dhcp">OpenWrt DHCP leases</option>
+					<option value="openwrt-export">OpenWrt export CSV</option>
 				</select>
-				<textarea id="bulkHostsInput" class="compact-textarea" spellcheck="false" placeholder="(Hosts) cat /etc/hosts &#10;(ARP) ip neighbour &#10;(DHCP leases) cat /tmp/dhcp.leases"></textarea>
+				<textarea id="bulkHostsInput" class="compact-textarea" spellcheck="false" placeholder="Host list: 172.16.20.10 Alexa-Kitchen iot&#10;Neighbour: 172.16.20.10 dev br-iot lladdr aa:bb:cc:dd:ee:ff REACHABLE&#10;DHCP: 1710000000 aa:bb:cc:dd:ee:ff 172.16.20.10 Alexa-Kitchen *&#10;Export CSV: ip,hostname,zone,mac"></textarea>
 				<div class="controls">
 					<button onclick="importBulkHosts()">Import Hosts</button>
 					<button onclick="clearBulkImport()">Clear Import</button>
@@ -526,10 +593,12 @@
 				<div class="controls">
 					<button onclick="exportDevicesJson()">Export Devices JSON</button>
 					<button onclick="exportDevicesCsv()">Export Devices CSV</button>
-					<button onclick="exportSessionJson()">Export Session JSON</button>
-					<button onclick="exportGraphPng()">Export Graph PNG</button>
+					<button class="button-good" onclick="exportSessionJson()">Export Full Session JSON</button>
+					<label class="file-label">
+						Import Session / Devices
+						<input type="file" accept=".json,.csv,.txt" onchange="importDataFile(event)" />
+					</label>
 				</div>
-				<input type="file" accept=".json,.csv,.txt" onchange="importDataFile(event)" />
 				<textarea id="exportOutput" class="compact-textarea export-output" spellcheck="false" readonly></textarea>
 			</section>
 		</section>
@@ -538,7 +607,7 @@
 			<h2>📊 Summary</h2>
 			<div id="summaryView" class="summary-grid"></div>
 
-			<section class="graph-panel">
+			<section id="graphPanel" class="graph-panel">
 				<h2>🕸️ Graph Visualiser</h2>
 
 				<div class="legend">
@@ -569,6 +638,8 @@
 					<button onclick="renderGraph('circle')">Circle Layout</button>
 					<button onclick="renderGraph('breadthfirst')">Layered Layout</button>
 					<button onclick="fitGraph()">Fit Graph</button>
+					<button class="button-info" id="graphExpandButton" onclick="toggleGraphExpanded()">Expand Graph</button>
+					<button onclick="exportGraphPng()">Export Graph PNG</button>
 					<select id="graphFilter" onchange="handleGraphFilterChange()">
 						<option value="all">Show all relationships</option>
 						<option value="allowed">Allowed only</option>
@@ -705,6 +776,7 @@ config rule
 			protocol: "",
 			destPort: ""
 		};
+		const RELATIONSHIP_PREVIEW_LIMIT = 15;
 		const VALID_GRAPH_LAYOUTS = ["cose", "circle", "breadthfirst"];
 		const VALID_GRAPH_FILTERS = ["all", "allowed", "blocked", "zones", "devices"];
 		const SUPPORTED_RULE_FIELDS = ["name", "src", "dest", "src_ip", "dest_ip", "proto", "dest_port", "target", "family", "enabled"];
@@ -723,6 +795,7 @@ config rule
 		let selectedTestPath = structuredClone(DEFAULT_TEST_PATH);
 		let selectedPathCriteria = structuredClone(DEFAULT_PATH_CRITERIA);
 		let graphPathHighlightRequested = false;
+		let relationshipMapExpanded = false;
 		let storageAvailable = true;
 
 		const autoParse = debounce(() => {
@@ -743,7 +816,15 @@ config rule
 			document.getElementById("helpBox").classList.toggle("hidden");
 		}
 
+		function toggleImportHelp() {
+			document.getElementById("importHelpBox").classList.toggle("hidden");
+		}
+
 		function loadExample() {
+			if (!confirm("Load the example config and reset devices? Current unsaved page state will be replaced.")) {
+				return;
+			}
+
 			document.getElementById("firewallInput").value = EXAMPLE_FIREWALL;
 			devices = structuredClone(DEFAULT_DEVICES);
 			subnetMappingsText = DEFAULT_SUBNET_MAPPINGS;
@@ -754,6 +835,23 @@ config rule
 			renderSubnetMappings();
 			renderPathCriteria();
 			parseAndRender();
+		}
+
+		function toggleGraphExpanded() {
+			const panel = document.getElementById("graphPanel");
+			const button = document.getElementById("graphExpandButton");
+
+			if (!panel) {
+				return;
+			}
+
+			panel.classList.toggle("expanded");
+
+			if (button) {
+				button.textContent = panel.classList.contains("expanded") ? "Collapse Graph" : "Expand Graph";
+			}
+
+			window.setTimeout(fitGraph, 50);
 		}
 
 		function loadConfigFile(event) {
@@ -1083,6 +1181,46 @@ config rule
 			parseAndRender();
 		}
 
+		function importUciSubnetMappings() {
+			const input = document.getElementById("uciSubnetInput");
+			const result = document.getElementById("uciSubnetResult");
+			const parsed = parseUciSubnetMappings(input?.value || "");
+
+			if (parsed.mappings.length === 0) {
+				if (result) {
+					result.innerHTML = `<span class="warn">0</span> mappings imported. Paste firewall/network UCI export lines first.`;
+				}
+
+				return;
+			}
+
+			const existing = new Set(parseSubnetMappingLines(subnetMappingsText));
+			parsed.mappings.forEach((mapping) => existing.add(mapping));
+			subnetMappingsText = Array.from(existing).join("\n");
+			renderSubnetMappings();
+			parseAndRender();
+
+			if (result) {
+				result.innerHTML = `
+					<span class="info">${parsed.mappings.length}</span> mappings imported,
+					<span class="${parsed.skipped.length ? "warn" : "info"}">${parsed.skipped.length}</span> skipped
+				`;
+			}
+		}
+
+		function clearUciSubnetInput() {
+			const input = document.getElementById("uciSubnetInput");
+			const result = document.getElementById("uciSubnetResult");
+
+			if (input) {
+				input.value = "";
+			}
+
+			if (result) {
+				result.innerHTML = "No UCI subnet import run yet.";
+			}
+		}
+
 		function clearBulkImport() {
 			const input = document.getElementById("bulkHostsInput");
 
@@ -1167,7 +1305,7 @@ config rule
 				return { message: "Import file was empty." };
 			}
 
-			if (filename.endsWith(".csv")) {
+			if (filename.endsWith(".csv") || looksLikeDeviceCsv(trimmed)) {
 				const importedDevices = parseDeviceCsv(trimmed);
 				const result = mergeDevices(importedDevices);
 				renderDeviceInputs();
@@ -1224,7 +1362,8 @@ config rule
 		function parseDeviceCsv(text) {
 			const lines = String(text || "").split(/\r?\n/).filter((line) => line.trim());
 			const firstLine = lines[0] || "";
-			const hasHeader = firstLine.toLowerCase().includes("name") && firstLine.toLowerCase().includes("ip");
+			const lowerHeader = firstLine.toLowerCase();
+			const hasHeader = lowerHeader.includes("ip") && (lowerHeader.includes("name") || lowerHeader.includes("hostname"));
 			const dataLines = hasHeader ? lines.slice(1) : lines;
 
 			return dataLines.map((line) => {
@@ -1237,9 +1376,17 @@ config rule
 			}).filter((device) => isValidIpv4(device.ip));
 		}
 
+		function looksLikeDeviceCsv(text) {
+			const firstLine = String(text || "").split(/\r?\n/).find((line) => line.trim()) || "";
+			const headers = parseCsvLine(firstLine).map((value) => value.toLowerCase());
+			return headers.includes("ip") && (headers.includes("name") || headers.includes("hostname")) && headers.includes("zone");
+		}
+
 		function mapCsvDeviceByHeader(parts, header) {
 			return header.reduce((result, key, index) => {
-				result[String(key || "").trim()] = parts[index] || "";
+				const normalisedKey = String(key || "").trim().toLowerCase();
+				const mappedKey = normalisedKey === "hostname" ? "name" : normalisedKey;
+				result[mappedKey] = parts[index] || "";
 				return result;
 			}, {});
 		}
@@ -1394,6 +1541,138 @@ config rule
 			return text;
 		}
 
+		function parseUciSubnetMappings(text) {
+			const firewallZones = {};
+			const networkConfigs = {};
+			const skipped = [];
+
+			String(text || "").split(/\r?\n/).forEach((line) => {
+				const parsed = parseUciAssignment(line);
+
+				if (!parsed) {
+					if (line.trim() && !line.trim().startsWith("#")) {
+						skipped.push(line.trim());
+					}
+
+					return;
+				}
+
+				if (parsed.namespace === "firewall") {
+					if (!firewallZones[parsed.section]) {
+						firewallZones[parsed.section] = {};
+					}
+
+					firewallZones[parsed.section][parsed.option] = parsed.value;
+				}
+
+				if (parsed.namespace === "network") {
+					if (!networkConfigs[parsed.section]) {
+						networkConfigs[parsed.section] = {};
+					}
+
+					networkConfigs[parsed.section][parsed.option] = parsed.value;
+				}
+			});
+
+			const mappings = [];
+
+			Object.values(firewallZones).forEach((zoneConfig) => {
+				const zoneName = zoneConfig.name || "";
+				const networkNames = String(zoneConfig.network || "")
+					.replaceAll("'", "")
+					.split(/\s+/)
+					.filter(Boolean);
+
+				networkNames.forEach((networkName) => {
+					const network = networkConfigs[networkName];
+
+					if (!network || !network.ipaddr) {
+						return;
+					}
+
+					const cidr = networkToCidr(network.ipaddr, network.netmask);
+
+					if (cidr && zoneName) {
+						mappings.push(`${cidr} ${zoneName}`);
+					}
+				});
+			});
+
+			return {
+				mappings: Array.from(new Set(mappings)),
+				skipped
+			};
+		}
+
+		function parseUciAssignment(line) {
+			const trimmed = String(line || "").trim();
+			const match = trimmed.match(/^(firewall|network)\.([^.]+(?:\[[^\]]+\])?)\.([A-Za-z0-9_]+)=(.*)$/);
+
+			if (!match) {
+				return null;
+			}
+
+			return {
+				namespace: match[1],
+				section: match[2],
+				option: match[3],
+				value: stripQuotes(match[4])
+			};
+		}
+
+		function stripQuotes(value) {
+			return String(value || "").trim().replace(/^['"]|['"]$/g, "");
+		}
+
+		function networkToCidr(ipaddr, netmask) {
+			const ipNumber = ipv4ToNumber(ipaddr);
+
+			if (ipNumber === null) {
+				return "";
+			}
+
+			const prefix = netmaskToPrefix(netmask || "255.255.255.0");
+
+			if (prefix === null) {
+				return "";
+			}
+
+			const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+			const network = numberToIpv4((ipNumber & mask) >>> 0);
+			return `${network}/${prefix}`;
+		}
+
+		function netmaskToPrefix(netmask) {
+			const maskNumber = ipv4ToNumber(netmask);
+
+			if (maskNumber === null) {
+				return null;
+			}
+
+			const binary = maskNumber.toString(2).padStart(32, "0");
+
+			if (!/^1*0*$/.test(binary)) {
+				return null;
+			}
+
+			return binary.indexOf("0") === -1 ? 32 : binary.indexOf("0");
+		}
+
+		function numberToIpv4(value) {
+			return [
+				(value >>> 24) & 255,
+				(value >>> 16) & 255,
+				(value >>> 8) & 255,
+				value & 255
+			].join(".");
+		}
+
+		function parseSubnetMappingLines(text) {
+			return String(text || "").split(/\r?\n/)
+				.map((line) => line.trim())
+				.filter(Boolean);
+		}
+
 		function parseBulkHosts(text, format = "auto") {
 			const subnetMappings = parseSubnetMappings(subnetMappingsText);
 			const result = {
@@ -1409,7 +1688,7 @@ config rule
 					return;
 				}
 
-				if (line.trim() && !line.trim().startsWith("#")) {
+				if (line.trim() && !line.trim().startsWith("#") && !isOpenWrtExportHeader(line)) {
 					result.skipped.push(`Line ${index + 1}: ${line.trim()}`);
 				}
 			});
@@ -1417,11 +1696,24 @@ config rule
 			return result;
 		}
 
+		function isOpenWrtExportHeader(line) {
+			const headers = parseCsvLine(String(line || "").trim()).map((value) => value.toLowerCase());
+			return headers[0] === "ip" && headers[1] === "hostname" && headers[2] === "zone" && headers[3] === "mac";
+		}
+
 		function parseHostLine(line, format = "auto", subnetMappings = []) {
 			const trimmed = String(line || "").trim();
 
 			if (!trimmed || trimmed.startsWith("#")) {
 				return null;
+			}
+
+			if (format === "openwrt-export" || format === "auto") {
+				const exported = parseOpenWrtExportCsvLine(trimmed);
+
+				if (exported || format === "openwrt-export") {
+					return exported;
+				}
 			}
 
 			if (format === "dhcp" || format === "auto") {
@@ -1441,6 +1733,30 @@ config rule
 			}
 
 			return parseSimpleHostLine(trimmed, subnetMappings);
+		}
+
+		function parseOpenWrtExportCsvLine(line) {
+			if (!line.includes(",")) {
+				return null;
+			}
+
+			const parts = parseCsvLine(line);
+
+			if (parts[0]?.toLowerCase() === "ip") {
+				return null;
+			}
+
+			if (parts.length < 3 || !isValidIpv4(parts[0])) {
+				return null;
+			}
+
+			return normaliseImportedDevice({
+				ip: parts[0],
+				name: parts[1] || parts[0],
+				zone: parts[2] || "",
+				mac: parts[3] || "",
+				source: "openwrt-export"
+			});
 		}
 
 		function parseSimpleHostLine(line, subnetMappings) {
@@ -2071,8 +2387,11 @@ config rule
 			}
 
 			const relationships = buildDeviceRelationships();
+			const visibleRelationships = relationshipMapExpanded
+				? relationships
+				: relationships.slice(0, RELATIONSHIP_PREVIEW_LIMIT);
 
-			relationships.forEach((item) => {
+			visibleRelationships.forEach((item) => {
 				const div = document.createElement("div");
 				div.className = `relationship ${item.decision.allowed ? "allowed" : "blocked"}`;
 				div.tabIndex = 0;
@@ -2099,6 +2418,22 @@ config rule
 
 				container.appendChild(div);
 			});
+
+			if (relationships.length > RELATIONSHIP_PREVIEW_LIMIT) {
+				const row = document.createElement("div");
+				row.className = "show-more-row";
+				row.innerHTML = `
+					<button onclick="toggleRelationshipMapExpanded()">
+						${relationshipMapExpanded ? "Show fewer relationships" : `Show all ${relationships.length} relationships`}
+					</button>
+				`;
+				container.appendChild(row);
+			}
+		}
+
+		function toggleRelationshipMapExpanded() {
+			relationshipMapExpanded = !relationshipMapExpanded;
+			renderRelationshipMap();
 		}
 
 		function renderAnalysisFindings() {

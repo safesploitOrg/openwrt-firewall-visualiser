@@ -29,6 +29,8 @@ This is a visual analysis tool, not a full OpenWrt firewall simulator. The decis
 openwrt-firewall-visualiser/
 ├── README.md          # Placeholder project documentation
 ├── ARCHITECTURE.md    # This architecture guide
+├── scripts/
+│   └── openwrt_export_hosts.sh
 └── public/
     └── index.html     # Complete single-file application
 ```
@@ -203,7 +205,7 @@ Device checks run in two steps:
 2. If no specific rule matches, fall back to evaluateZonePath().
 ```
 
-The parser stores `proto` and `dest_port`, but the current decision engine does not use protocol or port matching. That should be addressed before presenting the app as an accurate per-service firewall analyser.
+When protocol or destination port criteria are supplied in the path tester, the decision engine matches them against `proto` and `dest_port` fields. Empty criteria continue to behave as broad "any protocol / any port" checks.
 
 ## Phase D: View Rendering
 
@@ -350,7 +352,7 @@ The example is useful for demonstrating the relationship views, but it should no
 | Manual device mapping | Accurate device context depends on user input |
 | Simplified parser | Good for common UCI files, not a complete UCI interpreter |
 | Simplified decision engine | Useful for visual exploration, not a full firewall simulation |
-| Protocol and port fields are not evaluated | Per-service conclusions may be inaccurate |
+| Simplified protocol and port matching | Handles common protocol and port/range checks, but not every OpenWrt match expression |
 | Browser-local persistence | Saved state is per browser/profile unless exported as JSON |
 | CDN dependency | Graph rendering depends on external script availability |
 | No automated tests | Behaviour is currently verified manually |
@@ -520,7 +522,7 @@ Benefits:
 
 ### Phase G: Zone Inference Engine
 
-Status: partially implemented.
+Status: implemented.
 
 Objective: automatically assign firewall zones from subnet definitions when imported hosts do not include a zone.
 
@@ -558,19 +560,12 @@ Implemented details:
 - `parseSubnetMappings()` parses CIDR mappings.
 - `inferZoneForIp()` assigns zones during import when a host line has no explicit zone.
 - Unresolved imported hosts are counted in the import result panel.
-
-Todo:
-
-- Supported Input Formats
-    - 1. Manual Zone/Subnet Mapping (done)
-    - 2. OpenWRT UCI Export (todo)
-        - uci show firewall | grep "\.network=" 
-        - uci show network | grep -E "\.(ipaddr|netmask|proto)="
-- 
+- `parseUciSubnetMappings()` imports subnet mappings from OpenWrt UCI export lines such as `uci show firewall` and `uci show network`.
+- `networkToCidr()` converts `ipaddr` plus `netmask` into the correct CIDR network.
 
 ### Phase H: Network Discovery Importers
 
-Status: partially implemented.
+Status: implemented.
 
 Objective: support importing host data directly from common network tooling output.
 
@@ -585,20 +580,11 @@ Implemented details:
 
 - `parseNeighbourLine()` supports Linux/OpenWrt `ip neighbour` and common `arp -a` output.
 - `parseDhcpLeaseLine()` supports OpenWrt `/tmp/dhcp.leases`.
+- `parseOpenWrtExportCsvLine()` supports CSV from `scripts/openwrt_export_hosts.sh`.
 - DHCP hostnames are preferred when present.
 - IP-only names are used when no hostname is available.
 - Skipped source lines are shown in the import result panel.
-
-TODO:
-
-- Better placeholder for different import methods
-- Support for `openwrt_export_hosts.sh` script
-    - ip,hostname,zone,mac
-        172.16.20.10,Alexa-Kitchen,iot,aa:bb:cc:dd:ee:ff
-        172.16.20.11,Alexa-Bedroom,iot,aa:bb:cc:dd:ee:00
-        172.16.30.25,Guest-Phone,guest,aa:bb:cc:dd:ee:11
-    - ? button which points to the script
-- 
+- The bulk import help button documents the supported commands and links to the helper script.
 
 ### Phase I: Relationship Analysis Engine
 
@@ -640,7 +626,7 @@ Implemented improvements:
 
 ### Phase K: Import, Export, And Comparison
 
-Status: Mostly.
+Status: implemented.
 
 Workflows for longer-lived analysis are now available.
 
@@ -651,24 +637,19 @@ Implemented improvements:
 - Export graph images.
 - Compare two firewall configs.
 - Show before/after impact for changed forwardings and rules.
-
-Todo:
-
-- Clear colour coding for Export Session
-- Clearer button for Import Session
+- Export Session uses a distinct positive-action button.
+- Import Session / Devices is a dedicated file-import control.
 
 ### Phase L: Usability
 
-Status: In progress.
+Status: implemented.
 
 Implementation improvements:
 
-- Load examples (make this have a prompt, as it removed all existing configs, and can only be got back if 'Export Session JSON' was done prior)
-- Button to expand Graph Visualiser 
-    - Move 'Export Graph PNG' to graph visualiser
-    - 
-- Dropdown button for Device Relationship Map "see more" when items exceed 15 items
-- 
+- Loading the example now prompts before replacing the current state.
+- Graph Visualiser has an expand/collapse button.
+- Export Graph PNG moved into the Graph Visualiser toolbar.
+- Device Relationship Map shows the first 15 relationships by default and adds a show-all/show-fewer control when needed.
 
 ## Development Notes
 
@@ -703,4 +684,4 @@ Use this workflow after changes:
 
 ## Last Updated
 
-2026-06-09
+2026-06-10

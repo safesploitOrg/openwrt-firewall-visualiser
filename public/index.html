@@ -533,7 +533,7 @@
 
 			<div class="controls">
 				<button onclick="loadExample()">Reset All Configs</button>
-				<!-- <button onclick="parseAndRender()">Parse Firewall</button> -->
+				<button onclick="parseAndRender()">Parse Firewall</button>
 				<input type="file" id="configFile" accept=".txt,.conf,.firewall" onchange="loadConfigFile(event)" />
 			</div>
 
@@ -593,7 +593,7 @@ ssh root@172.16.0.1 sh /tmp/openwrt_export_hosts.sh</pre>
 				<div class="controls">
 					<button onclick="exportDevicesJson()">Export Devices JSON</button>
 					<button onclick="exportDevicesCsv()">Export Devices CSV</button>
-					<button class="button-good" onclick="exportSessionJson()">Export Full Session JSON</button>
+					<button class="button-warn" onclick="exportSessionJson()">Export Full Session JSON</button>
 					<label class="file-label">
 						Import Session / Devices
 						<input type="file" accept=".json,.csv,.txt" onchange="importDataFile(event)" />

@@ -100,6 +100,7 @@ let relationshipMapExpanded = false;
 let hostImportHasRun = false;
 let subnetImportHasRun = false;
 let sessionImportHasRun = false;
+let importSectionCollapsed = false;
 let storageAvailable = true;
 
 const autoParse = debounce(() => {
@@ -110,6 +111,7 @@ function main() {
 	setCurrentYear();
 	loadState();
 	bindReactiveControls();
+	renderImportSectionCollapsed();
 	renderDeviceInputs();
 	renderSubnetMappings();
 	renderPathCriteria();
@@ -128,6 +130,26 @@ function toggleImportHelp() {
 	document.getElementById("importHelpBox").classList.toggle("hidden");
 }
 
+function toggleImportSectionCollapsed() {
+	importSectionCollapsed = !importSectionCollapsed;
+	renderImportSectionCollapsed();
+	saveState();
+}
+
+function renderImportSectionCollapsed() {
+	const section = document.getElementById("importSection");
+	const button = document.getElementById("importCollapseButton");
+
+	if (section) {
+		section.classList.toggle("collapsed", importSectionCollapsed);
+	}
+
+	if (button) {
+		button.textContent = importSectionCollapsed ? "Expand" : "Collapse";
+		button.setAttribute("aria-expanded", String(!importSectionCollapsed));
+	}
+}
+
 function loadExample() {
 	if (!confirm("Load the example config and reset devices? Current unsaved page state will be replaced.")) {
 		return;
@@ -142,6 +164,8 @@ function loadExample() {
 	hostImportHasRun = false;
 	subnetImportHasRun = false;
 	sessionImportHasRun = false;
+	importSectionCollapsed = false;
+	renderImportSectionCollapsed();
 	renderDeviceInputs();
 	renderSubnetMappings();
 	renderPathCriteria();
@@ -400,6 +424,7 @@ function loadState() {
 	hostImportHasRun = Boolean(savedState.importState?.hostImportHasRun);
 	subnetImportHasRun = Boolean(savedState.importState?.subnetImportHasRun);
 	sessionImportHasRun = Boolean(savedState.importState?.sessionImportHasRun);
+	importSectionCollapsed = Boolean(savedState.uiState?.importSectionCollapsed);
 	graphPathHighlightRequested = false;
 
 	if (graphFilter) {
@@ -898,6 +923,9 @@ function buildStatePayload() {
 			hostImportHasRun,
 			subnetImportHasRun,
 			sessionImportHasRun
+		},
+		uiState: {
+			importSectionCollapsed
 		}
 	};
 }

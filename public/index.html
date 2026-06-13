@@ -18,6 +18,51 @@
 
 	<main>
 		<section class="panel">
+			<section id="importSection" class="tool-section import-section import-section-top">
+				<div class="section-title-row">
+					<h2>📥 Import</h2>
+					<div class="section-actions">
+						<button class="help-btn" type="button" onclick="toggleImportHelp()">?</button>
+						<button id="importCollapseButton" class="collapse-btn" type="button" aria-expanded="true" onclick="toggleImportSectionCollapsed()">Collapse</button>
+					</div>
+				</div>
+				<div id="importHelpBox" class="help-box hidden">
+					<p><strong>Supported inputs:</strong> host lists, <code>ip neighbour</code>, <code>arp -a</code>, <code>cat /tmp/dhcp.leases</code>, and CSV from <a href="https://github.com/safesploitOrg/openwrt-firewall-visualiser/blob/main/scripts/openwrt_export_hosts.sh" target="_blank" rel="noopener noreferrer">scripts/openwrt_export_hosts.sh</a>.</p>
+					<pre>scp scripts/openwrt_export_hosts.sh root@172.16.0.1:/tmp/
+ssh root@172.16.0.1 sh /tmp/openwrt_export_hosts.sh</pre>
+					<p class="small">The script output format is <code>ip,hostname,zone,mac</code>.</p>
+				</div>
+				<div id="importSectionBody" class="collapsible-body">
+					<div id="importChecklist" class="checklist"></div>
+					<h3>Bulk Import Hosts</h3>
+					<select id="bulkImportFormat">
+						<option value="auto">Auto detect</option>
+						<option value="host-list">Host list</option>
+						<option value="neighbour">Neighbour / ARP table</option>
+						<option value="dhcp">OpenWrt DHCP leases</option>
+						<option value="openwrt-export">OpenWrt export CSV</option>
+					</select>
+					<textarea id="bulkHostsInput" class="compact-textarea" spellcheck="false" placeholder="Host list: 172.16.20.10 Alexa-Kitchen iot&#10;Neighbour: 172.16.20.10 dev br-iot lladdr aa:bb:cc:dd:ee:ff REACHABLE&#10;DHCP: 1710000000 aa:bb:cc:dd:ee:ff 172.16.20.10 Alexa-Kitchen *&#10;Export CSV: ip,hostname,zone,mac"></textarea>
+					<div class="controls">
+						<button onclick="importBulkHosts()">Import Hosts</button>
+						<button onclick="clearBulkImport()">Clear Import</button>
+					</div>
+					<div id="bulkImportResult" class="result small import-result">No hosts imported yet.</div>
+
+					<h3>Session Tools</h3>
+					<div class="controls">
+						<button onclick="exportDevicesJson()">Export Devices JSON</button>
+						<button onclick="exportDevicesCsv()">Export Devices CSV</button>
+						<button class="button-warn" onclick="exportSessionJson()">Export Full Session JSON</button>
+						<label class="file-label">
+							Import Session / Devices
+							<input type="file" accept=".json,.csv,.txt" onchange="importDataFile(event)" />
+						</label>
+					</div>
+					<textarea id="exportOutput" class="compact-textarea export-output" spellcheck="false" readonly></textarea>
+				</div>
+			</section>
+
 			<div class="help-row">
 				<h2>📥 Firewall Config</h2>
 				<button class="help-btn" type="button" onclick="toggleHelp()">?</button>
@@ -54,7 +99,7 @@
 
 			<h2>📡 Devices</h2>
 			<p class="small">
-				Map real devices to firewall zones, or use the import section below to populate them in bulk.
+				Map real devices to firewall zones, or use the import section above to populate them in bulk.
 			</p>
 
 			<div class="controls">
@@ -79,6 +124,10 @@
 					<p>For OpenWrt UCI import, paste the output of these commands into the UCI box:</p>
 					<pre>uci show firewall | grep -E "\.(name|network)="
 uci show network | grep -E "\.(ipaddr|netmask)="</pre>
+					<p>Helper script:</p>
+					<pre>scp scripts/openwrt_export_subnet_mappings.sh root@172.16.0.1:/tmp/
+ssh root@172.16.0.1 sh /tmp/openwrt_export_subnet_mappings.sh</pre>
+					<p class="small">Script source: <a href="https://github.com/safesploitOrg/openwrt-firewall-visualiser/blob/main/scripts/openwrt_export_subnet_mappings.sh" target="_blank" rel="noopener noreferrer">scripts/openwrt_export_subnet_mappings.sh</a>.</p>
 					<p class="small">This is separate from the firewall config parser. The main firewall box still expects <code>/etc/config/firewall</code>.</p>
 				</div>
 				<textarea id="subnetMappings" class="compact-textarea" spellcheck="false" onchange="handleSubnetMappingsChange()"></textarea>
@@ -90,47 +139,6 @@ uci show network | grep -E "\.(ipaddr|netmask)="</pre>
 				<div id="uciSubnetResult" class="result small import-result">No UCI subnet import run yet.</div>
 			</section>
 
-			<!-- Import Section -->
-			 <!-- Maybe move this to the top with a collapse button -->
-			<section class="tool-section import-section">
-				<div class="help-row">
-					<h2>📥 Import</h2>
-					<button class="help-btn" type="button" onclick="toggleImportHelp()">?</button>
-				</div>
-				<div id="importHelpBox" class="help-box hidden">
-					<p><strong>Supported inputs:</strong> host lists, <code>ip neighbour</code>, <code>arp -a</code>, <code>cat /tmp/dhcp.leases</code>, and CSV from <a href="https://github.com/safesploitOrg/openwrt-firewall-visualiser/blob/main/scripts/openwrt_export_hosts.sh" target="_blank" rel="noopener noreferrer">scripts/openwrt_export_hosts.sh</a>.</p>
-					<pre>scp scripts/openwrt_export_hosts.sh root@172.16.0.1:/tmp/
-ssh root@172.16.0.1 sh /tmp/openwrt_export_hosts.sh</pre>
-					<p class="small">The script output format is <code>ip,hostname,zone,mac</code>.</p>
-				</div>
-				<div id="importChecklist" class="checklist"></div>
-				<h3>Bulk Import Hosts</h3>
-				<select id="bulkImportFormat">
-					<option value="auto">Auto detect</option>
-					<option value="host-list">Host list</option>
-					<option value="neighbour">Neighbour / ARP table</option>
-					<option value="dhcp">OpenWrt DHCP leases</option>
-					<option value="openwrt-export">OpenWrt export CSV</option>
-				</select>
-				<textarea id="bulkHostsInput" class="compact-textarea" spellcheck="false" placeholder="Host list: 172.16.20.10 Alexa-Kitchen iot&#10;Neighbour: 172.16.20.10 dev br-iot lladdr aa:bb:cc:dd:ee:ff REACHABLE&#10;DHCP: 1710000000 aa:bb:cc:dd:ee:ff 172.16.20.10 Alexa-Kitchen *&#10;Export CSV: ip,hostname,zone,mac"></textarea>
-				<div class="controls">
-					<button onclick="importBulkHosts()">Import Hosts</button>
-					<button onclick="clearBulkImport()">Clear Import</button>
-				</div>
-				<div id="bulkImportResult" class="result small import-result">No hosts imported yet.</div>
-
-				<h3>Session Tools</h3>
-				<div class="controls">
-					<button onclick="exportDevicesJson()">Export Devices JSON</button>
-					<button onclick="exportDevicesCsv()">Export Devices CSV</button>
-					<button class="button-warn" onclick="exportSessionJson()">Export Full Session JSON</button>
-					<label class="file-label">
-						Import Session / Devices
-						<input type="file" accept=".json,.csv,.txt" onchange="importDataFile(event)" />
-					</label>
-				</div>
-				<textarea id="exportOutput" class="compact-textarea export-output" spellcheck="false" readonly></textarea>
-			</section>
 		</section>
 
 		<section class="panel">

@@ -138,11 +138,33 @@ input {
 	margin-bottom: 0.5rem;
 }
 
+.section-title-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	margin-bottom: 0.5rem;
+}
+
+.section-title-row h2 {
+	margin: 0;
+}
+
+.section-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
 .help-btn {
 	width: 1.8rem;
 	height: 1.8rem;
 	padding: 0;
 	border-radius: 999px;
+}
+
+.collapse-btn {
+	min-width: 5.25rem;
 }
 
 .help-box {
@@ -327,6 +349,19 @@ pre {
 
 .import-section {
 	border-top-color: rgba(56, 189, 248, 0.55);
+}
+
+.import-section-top {
+	margin-top: 0;
+	margin-bottom: 1rem;
+	padding-top: 0;
+	padding-bottom: 1rem;
+	border-top: 0;
+	border-bottom: 1px solid rgba(56, 189, 248, 0.55);
+}
+
+.import-section.collapsed .collapsible-body {
+	display: none;
 }
 
 .checklist {

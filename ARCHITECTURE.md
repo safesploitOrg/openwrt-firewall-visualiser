@@ -30,7 +30,8 @@ openwrt-firewall-visualiser/
 ├── README.md          # Placeholder project documentation
 ├── ARCHITECTURE.md    # This architecture guide
 ├── scripts/
-│   └── openwrt_export_hosts.sh
+│   ├── openwrt_export_hosts.sh
+│   └── openwrt_export_subnet_mappings.sh
 └── public/
     ├── index.html     # Application markup and external asset references
     └── assets/
@@ -484,7 +485,7 @@ Objective: allow users to populate devices from existing network inventories ins
 
 Requirements:
 
-- Add a clearly labelled "Import" section with a "Bulk Import Hosts" subsection.
+- Add a clearly labelled, top-of-panel "Import" section with a "Bulk Import Hosts" subsection.
 - Support device inventory exports.
 - Support host lists.
 - Support DHCP exports.
@@ -518,6 +519,7 @@ Supported Linux neighbour table format:
 Implemented details:
 
 - Import controls are grouped separately from manual Devices and Subnet Mappings controls.
+- The Import section can be collapsed when the user is done with first-run setup or file imports.
 - `renderImportChecklist()` shows first-time users which setup/import steps are currently populated.
 - `importBulkHosts()` imports the textarea content.
 - `parseBulkHosts()` parses host data line-by-line.
@@ -569,6 +571,7 @@ Implemented details:
 
 - The `subnetMappings` textarea stores subnet-to-zone mappings.
 - The Subnet Mappings help box explains when the mappings are used, the manual `CIDR zone` format, and the exact UCI output expected by the UCI import field.
+- The Subnet Mappings help box links to `scripts/openwrt_export_subnet_mappings.sh`, which exports the matching OpenWrt UCI lines from a router.
 - `parseSubnetMappings()` parses CIDR mappings.
 - `inferZoneForIp()` assigns zones during import when a host line has no explicit zone.
 - Unresolved imported hosts are counted in the import result panel.
@@ -652,6 +655,7 @@ Implemented improvements:
 - Export Session uses a distinct positive-action button.
 - Import Session / Devices is a dedicated file-import control.
 - Import status is persisted with saved sessions so the checklist reflects restored state.
+- Import section collapsed/expanded state is persisted with saved sessions.
 
 ### Phase L: Usability
 
@@ -660,11 +664,18 @@ Status: implemented.
 Implementation improvements:
 
 - Loading the example now prompts before replacing the current state.
-- Devices, Subnet Mappings, and Import are separate left-panel sections.
+- Import, Devices, and Subnet Mappings are separate left-panel sections.
+- Import is positioned before manual configuration entry so first-time users can start from existing exports.
 - Subnet Mappings has its own help button, with less ambiguous guidance about when subnet mappings are used.
 - Graph Visualiser has an expand/collapse button.
 - Export Graph PNG moved into the Graph Visualiser toolbar.
 - Device Relationship Map shows the first 15 relationships by default and adds a show-all/show-fewer control when needed.
+
+## Phase M: Testing
+
+Phase M provides unit testing for CI/CD
+
+
 
 ## Development Notes
 

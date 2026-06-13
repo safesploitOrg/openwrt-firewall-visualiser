@@ -2,6 +2,8 @@
 
 A single-page browser application for visualising `/etc/config/firewall` relationships. Paste or upload an OpenWrt firewall configuration, map devices to zones, and visually inspect zone-to-zone and device-to-device connectivity.
 
+---
+
 ## Features
 
 - **No Backend Required** — All parsing and analysis happens in your browser; no server, database, or build step needed
@@ -14,16 +16,19 @@ A single-page browser application for visualising `/etc/config/firewall` relatio
 - **Multiple Graph Layouts** — Force-directed, circular, and breadth-first layouts
 - **Relationship Filtering** — Show all paths, allowed only, blocked only, zone-only, or device-only relationships
 
+---
+
 ## Quick Start
 
 1. **Open the app**: Open [`public/index.html`](public/index.html) in any modern browser
 2. **Paste your firewall config**: Copy `/etc/config/firewall` from your OpenWrt router and paste it into the textarea
 3. **Map devices to zones**: Add devices with names, IP addresses, and their associated firewall zones (via import or manually)
-4. **Visualise relationships**: The graph renders automatically showing zones, devices, and their connectivity
+4. **Map subnets**: Add subnets mappings (import via `scripts/openwrt_export_subnet_mappings.sh`)
+5. **Visualise relationships**: The graph renders automatically showing zones, devices, and their connectivity
 
 ---
 
-### Getting Firewall Config from OpenWrt
+### 1. Getting Firewall Config from OpenWrt
 
 On your OpenWrt router:
 
@@ -37,7 +42,7 @@ Or copy it remotely:
 scp root@<router-ip>:/etc/config/firewall ./firewall.conf
 ```
 
-### Importing Devices
+### 2. Importing Devices
 
 Use the **Import** section to bulk-load devices from:
 
@@ -58,7 +63,7 @@ sh /tmp/openwrt_export_hosts.sh
 
 Output format: `ip,hostname,zone,mac`
 
-### Importing Subnet Mappings
+### 3. Importing Subnet Mappings
 
 The `scripts/openwrt_export_subnet_mappings.sh` script generates UCI outputs which can be pasted into Subnet Mappings and `Import UCI Subnets`
 

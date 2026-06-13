@@ -18,10 +18,10 @@ This is a visual analysis tool, not a full OpenWrt firewall simulator. The decis
 | Layer | Technology |
 | --- | --- |
 | Markup | HTML5 |
-| Styling | Inline CSS with custom properties and a dark theme |
-| Behaviour | Vanilla JavaScript |
+| Styling | `public/assets/css/styles.css` with custom properties and a dark theme |
+| Behaviour | `public/assets/js/app.js` using vanilla JavaScript |
 | Graph rendering | Cytoscape.js v3.30.4 from CDN |
-| Distribution | Static `public/index.html` |
+| Distribution | Static files under `public/` |
 
 ## File Structure
 
@@ -32,12 +32,17 @@ openwrt-firewall-visualiser/
 ├── scripts/
 │   └── openwrt_export_hosts.sh
 └── public/
-    └── index.html     # Complete single-file application
+    ├── index.html     # Application markup and external asset references
+    └── assets/
+        ├── css/
+        │   └── styles.css
+        └── js/
+            └── app.js
 ```
 
 ## Runtime State
 
-The app keeps a small amount of global state inside `public/index.html`:
+The app keeps a small amount of global state inside `public/assets/js/app.js`:
 
 | Variable | Purpose |
 | --- | --- |
@@ -46,6 +51,8 @@ The app keeps a small amount of global state inside `public/index.html`:
 | `cy` | Current Cytoscape graph instance |
 | `currentLayout` | Selected graph layout name |
 | `selectedTestPath` | Source and destination device indexes used by the path tester |
+| `selectedPathCriteria` | Optional protocol and destination-port criteria for path tests |
+| `subnetMappingsText` | CIDR-to-zone mappings used for host-zone inference |
 | `storageAvailable` | Guard for browsers where `localStorage` is blocked or unavailable |
 
 ## Data Model
@@ -83,6 +90,8 @@ interface Device {
 	name: string;
 	ip: string;
 	zone: string;
+	mac?: string;
+	source?: string;
 }
 
 interface Decision {
@@ -420,7 +429,7 @@ Relevant functions and elements:
 
 ## Implemented Future Enhancements
 
-The following phases continue the roadmap sequence after Phase A-C and are now implemented in `public/index.html`.
+The following phases continue the roadmap sequence after Phase A-C and are now implemented across `public/index.html`, `public/assets/css/styles.css`, and `public/assets/js/app.js`.
 
 ### Phase D: Local Storage Lifecycle Management
 
@@ -475,7 +484,7 @@ Objective: allow users to populate devices from existing network inventories ins
 
 Requirements:
 
-- Add a dedicated "Bulk Import Hosts" section.
+- Add a clearly labelled "Import" section with a "Bulk Import Hosts" subsection.
 - Support device inventory exports.
 - Support host lists.
 - Support DHCP exports.
@@ -508,6 +517,8 @@ Supported Linux neighbour table format:
 
 Implemented details:
 
+- Import controls are grouped separately from manual Devices and Subnet Mappings controls.
+- `renderImportChecklist()` shows first-time users which setup/import steps are currently populated.
 - `importBulkHosts()` imports the textarea content.
 - `parseBulkHosts()` parses host data line-by-line.
 - `parseHostLine()` handles host-list, neighbour/ARP, and DHCP lease formats.
@@ -557,6 +568,7 @@ zone = iot
 Implemented details:
 
 - The `subnetMappings` textarea stores subnet-to-zone mappings.
+- The Subnet Mappings help box explains when the mappings are used, the manual `CIDR zone` format, and the exact UCI output expected by the UCI import field.
 - `parseSubnetMappings()` parses CIDR mappings.
 - `inferZoneForIp()` assigns zones during import when a host line has no explicit zone.
 - Unresolved imported hosts are counted in the import result panel.
@@ -639,6 +651,7 @@ Implemented improvements:
 - Show before/after impact for changed forwardings and rules.
 - Export Session uses a distinct positive-action button.
 - Import Session / Devices is a dedicated file-import control.
+- Import status is persisted with saved sessions so the checklist reflects restored state.
 
 ### Phase L: Usability
 
@@ -647,6 +660,8 @@ Status: implemented.
 Implementation improvements:
 
 - Loading the example now prompts before replacing the current state.
+- Devices, Subnet Mappings, and Import are separate left-panel sections.
+- Subnet Mappings has its own help button, with less ambiguous guidance about when subnet mappings are used.
 - Graph Visualiser has an expand/collapse button.
 - Export Graph PNG moved into the Graph Visualiser toolbar.
 - Device Relationship Map shows the first 15 relationships by default and adds a show-all/show-fewer control when needed.
@@ -655,11 +670,11 @@ Implementation improvements:
 
 The current implementation is intentionally simple:
 
-- Inline CSS.
-- Inline JavaScript.
-- No modules.
+- Static HTML, CSS, and JavaScript files.
+- No JavaScript modules.
 - No build tooling.
 - No npm dependencies.
+- Deployable to any static host by serving the `public/` directory.
 
 When adding a feature, follow the phase order:
 
@@ -684,4 +699,4 @@ Use this workflow after changes:
 
 ## Last Updated
 
-2026-06-10
+2026-06-13

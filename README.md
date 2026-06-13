@@ -18,9 +18,18 @@ A single-page browser application for visualising `/etc/config/firewall` relatio
 
 ---
 
+## Preview
+
+![Openwrt Firewall Visualiser Demo1](https://raw.githubusercontent.com/safesploitOrg/assets/main/openwrt-firewall-visualiser/media/openwrt-firewall-visualiser-demo1.png)
+
+
+![Openwrt Firewall Visualiser Demo2](https://raw.githubusercontent.com/safesploitOrg/assets/main/openwrt-firewall-visualiser/media/openwrt-firewall-visualiser-demo2.png)
+
+---
+
 ## Quick Start
 
-1. **Open the app**: Open [`public/index.html`](public/index.html) in any modern browser
+1. **Open the app**: Open [`public/index.html`](public/index.html) in any modern browser, or [link](https://safesploitorg.github.io/openwrt-firewall-visualiser/)
 2. **Paste your firewall config**: Copy `/etc/config/firewall` from your OpenWrt router and paste it into the textarea
 3. **Map devices to zones**: Add devices with names, IP addresses, and their associated firewall zones (via import or manually)
 4. **Map subnets**: Add subnets mappings (import via `scripts/openwrt_export_subnet_mappings.sh`)

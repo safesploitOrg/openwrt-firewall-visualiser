@@ -21,6 +21,8 @@ This is a visual analysis tool, not a full OpenWrt firewall simulator. The decis
 | Styling | `public/assets/css/styles.css` with custom properties and a dark theme |
 | Behaviour | `public/assets/js/app.js` using vanilla JavaScript |
 | Graph rendering | Cytoscape.js v3.30.4 from CDN |
+| Unit tests | Node.js built-in `node:test` runner |
+| CI/CD | GitHub Actions, with tests gating GitHub Pages deployment |
 | Distribution | Static files under `public/` |
 
 ## File Structure
@@ -29,9 +31,17 @@ This is a visual analysis tool, not a full OpenWrt firewall simulator. The decis
 openwrt-firewall-visualiser/
 ├── README.md          # Placeholder project documentation
 ├── ARCHITECTURE.md    # This architecture guide
+├── package.json       # Test script only; no runtime dependencies
+├── .github/
+│   └── workflows/
+│       └── static.yml # Unit tests and GitHub Pages deployment
 ├── scripts/
 │   ├── openwrt_export_hosts.sh
 │   └── openwrt_export_subnet_mappings.sh
+├── tests/
+│   ├── app.test.js
+│   └── helpers/
+│       └── load-app.js
 └── public/
     ├── index.html     # Application markup and external asset references
     └── assets/
@@ -673,9 +683,16 @@ Implementation improvements:
 
 ## Phase M: Testing
 
-Phase M provides unit testing for CI/CD
+Status: implemented.
 
+Objective: provide fast regression coverage for the parser, importers, storage lifecycle, and UI state helpers without adding a frontend build system.
 
+Implemented details:
+
+- `package.json` defines `npm test`.
+- `tests/helpers/load-app.js` loads `public/assets/js/app.js` into a Node VM and exposes selected helpers for testing.
+- `tests/app.test.js` covers firewall parsing, rule/path evaluation, protocol and port matching, UCI subnet import, bulk host import, CSV parsing, device merging, localStorage expiry, state payloads, and import-panel collapse state.
+- `.github/workflows/static.yml` runs the unit tests before GitHub Pages deployment.
 
 ## Development Notes
 
@@ -686,6 +703,18 @@ The current implementation is intentionally simple:
 - No build tooling.
 - No npm dependencies.
 - Deployable to any static host by serving the `public/` directory.
+
+## Testing And CI
+
+Run the local test suite with:
+
+```bash
+npm test
+```
+
+The tests load `public/assets/js/app.js` into a Node VM, expose selected parser/state helpers, and exercise the firewall parser, path evaluator, host importers, subnet importer, localStorage expiry, and import-panel UI state.
+
+`.github/workflows/static.yml` runs the same tests on pull requests, pushes to `main`, and manual workflow dispatches. The GitHub Pages deploy job depends on the test job and does not run for pull requests.
 
 When adding a feature, follow the phase order:
 

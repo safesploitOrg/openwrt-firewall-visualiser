@@ -90,12 +90,24 @@ The `scripts/openwrt_export_subnet_mappings.sh` script generates UCI outputs whi
 
 ---
 
+## Development
+
+The app has no build step. Unit tests use Node's built-in test runner:
+
+```bash
+npm test
+```
+
+GitHub Actions runs the same test command before deploying GitHub Pages.
+
+---
+
 ## Limitations
 
 - **Simplified firewall model** — Does not simulate every fw3/fw4, nftables, iptables, NAT, conntrack, or bridge behavior
 - **Manual device mapping** — Device context depends on user input (not auto-inferred)
 - **Parser scope** — Does not process include files, generated fragments, or complex quoting
-- **No protocol/port matching** — Handles common patterns but not all OpenWrt match expressions
+- **Limited protocol/port matching** — Handles common patterns but not all OpenWrt match expressions
 - **Per-browser storage** — `localStorage` is browser/profile-specific; export sessions to share
 
 ---
